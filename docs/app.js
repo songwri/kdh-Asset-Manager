@@ -44,8 +44,15 @@
     if (st.local) return { ok: true };
     const url = localStorage.getItem('am_api');
     const token = sessionStorage.getItem('am_tok');
-    const res = await fetch(url, { method: 'POST', body: JSON.stringify(Object.assign({ action, token }, payload || {})) });
-    const j = await res.json();
+    let res, j;
+    try {
+      res = await fetch(url, { method: 'POST', body: JSON.stringify(Object.assign({ action, token }, payload || {})) });
+    } catch (e) {
+      throw new Error('서버에 연결하지 못했습니다. 웹 앱 주소가 맞는지, 배포 권한이 "모든 사용자"인지 확인하세요.');
+    }
+    try { j = await res.json(); } catch (e) {
+      throw new Error('응답이 올바르지 않습니다. 배포의 "액세스 권한"을 "모든 사용자"로 하고 새 버전으로 다시 배포했는지 확인하세요.');
+    }
     if (!j.ok) { if (j.error === 'AUTH') { logout(true); } throw new Error(j.error || '오류'); }
     return j;
   }
@@ -78,6 +85,7 @@
   async function doLogin() {
     const url = $('#apiUrl').value.trim(), pin = $('#pin').value;
     if (!/^https:\/\/script\.google\.com\//.test(url)) { $('#loginErr').textContent = 'Apps Script 웹 앱 URL(https://script.google.com/...)을 입력하세요.'; return; }
+    if (!/\/exec(\?.*)?$/.test(url)) { $('#loginErr').textContent = '주소가 /exec 로 끝나야 합니다. (배포 > 웹 앱의 URL을 복사하세요. /dev 로 끝나는 주소는 안 됩니다.)'; return; }
     localStorage.setItem('am_api', url);
     $('#loginBtn').disabled = true; $('#loginErr').textContent = '확인 중…';
     try {
