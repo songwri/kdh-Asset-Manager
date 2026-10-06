@@ -172,7 +172,8 @@ function sheet_(tab) {
 
 function cellOut_(tab, col, v) {
   if (v instanceof Date) {
-    const tz = Session.getScriptTimeZone();
+    // 시트가 '2027-03'을 날짜로 바꿔 저장한 경우: 스크립트 시간대(기본 미국)로 읽으면 하루 밀려 '2027-02'가 되므로 시트 시간대로 읽는다
+    const tz = SpreadsheetApp.getActiveSpreadsheet().getSpreadsheetTimeZone() || Session.getScriptTimeZone();
     return Utilities.formatDate(v, tz, col === 'date' ? 'yyyy-MM-dd' : 'yyyy-MM');
   }
   if (isNumCol_(tab, col)) return v === '' ? '' : Number(v);

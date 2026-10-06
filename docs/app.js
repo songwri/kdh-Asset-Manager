@@ -79,7 +79,7 @@
     Expenses: r => [esc(r.name || '새 지출'), esc(r.category || '') + ' · ' + periodTxt(r), fm(num(r.amount, 0))],
     Assets: r => [esc(r.name || '새 자산'), optLabel('assetCat', r.category) + ' · ' + optLabel('owner', r.owner), fm(num(r.value, 0))],
     Holdings: r => [esc(r.name || '새 종목'), optLabel('account', r.account) + ' · ' + won(r.qty) + '주 · 현재가 ' + won(r.price) + '원' + (r.symbol ? ' · ' + esc(r.symbol) : ' · 시세 코드 없음'), fm(num(r.qty, 0) * num(r.price, 0) / 10000)],
-    Debts: r => [esc(r.name || '새 대출'), num(r.rate, 0) + '% · ' + num(r.term, 0) + '개월 · ' + esc(r.start || ''), fm(num(r.principal, 0))],
+    Debts: r => [esc(r.name || '새 대출'), num(r.rate, 0) + '% · ' + num(r.term, 0) + '개월 · 실행 ' + esc(r.start || '(월 없음)') + (E.isY(r.disburse) ? ' · 실행 때 입금' : ' · 입금 없음'), fm(num(r.principal, 0))],
     Events: r => [esc(r.name || '새 일정'), esc(r.date || '') + ' · ' + optLabel('evCat', r.category) + (r.certain === 'Y' ? '' : ' · 추정'), signedTxt(num(r.amount, 0))],
   };
   const MANAGE_INFO = {
@@ -289,6 +289,24 @@
       '<div class="elist" data-etab="' + tab + '">' + body + '</div><div class="toolbar"><button class="primary" data-add="' + tab + '">+ 추가</button></div>';
   }
 
+  /** 입력 데이터에서 계산이 어긋날 만한 부분을 찾아 알려준다 */
+  function dataChecks() {
+    const S = E.settings(st.data), out = [];
+    const pIdx = E.idxOf(S.house_purchase_ym);
+    const debts = (st.data.Debts || []).filter(d => E.isActive(d.active));
+    debts.forEach(d => {
+      const big = num(d.principal, 0) >= 10000;
+      if (E.isY(d.disburse) && E.idxOf(d.start) == null) out.push('"' + (d.name || '대출') + '"의 실행 월이 비어 있거나 형식이 다릅니다. YYYY-MM 형식(예: 2027-03)으로 입력하세요.');
+      if (big && !E.isY(d.disburse)) out.push('"' + (d.name || '대출') + '"의 "실행할 때 돈이 들어옴"이 아니오로 되어 있어 대출금 ' + fm(num(d.principal, 0)) + '이 들어오는 돈으로 잡히지 않습니다. 주택담보대출이면 예로 바꾸세요.');
+      if (big && E.isY(d.disburse) && pIdx != null && E.idxOf(d.start) != null && E.idxOf(d.start) !== pIdx && /주택|담보|주담/.test(String(d.name))) out.push('"' + (d.name || '대출') + '"의 실행 월(' + d.start + ')이 집 잔금 월(' + S.house_purchase_ym + ')과 다릅니다. 잔금일에 실행되는 대출이면 같은 월로 맞추세요.');
+    });
+    if (pIdx != null && !debts.some(d => E.isY(d.disburse) && E.idxOf(d.start) === pIdx)) {
+      const pay = (st.data.Events || []).filter(e => E.isActive(e.active) && String(e.category) === 'house_pay' && E.idxOf(e.date) === pIdx).reduce((q, e) => q - num(e.amount, 0), 0);
+      if (pay > 0) out.push('집 잔금 월(' + S.house_purchase_ym + ')에 들어오는 대출이 없습니다. [관리 > 대출·할부]에서 주택담보대출의 실행 월과 "실행할 때 돈이 들어옴 = 예"를 확인하세요.');
+    }
+    return Array.from(new Set(out));
+  }
+  const checksHtml = () => { const c = dataChecks(); return c.length ? '<div class="note risk"><div class="hd"><span class="badge">확인 필요</span><span>입력값 점검</span></div><ul>' + c.map(x => '<li>' + esc(x) + '</li>').join('') + '</ul><div class="toolbar">' + link('대출·할부 고치기', 'manage', 'debts') + '</div></div>' : ''; };
   /* ---------- 홈 ---------- */
   function budgetCard(sim, cur) {
     const led = st.data.Ledger || [];
@@ -338,7 +356,7 @@
       const big = u.ev.slice().sort((a, b) => Math.abs(b.amt) - Math.abs(a.amt)).slice(0, 3);
       return '<li><div class="row-between"><b>' + sim.ym[u.k] + '</b><span>' + signed(tot) + '</span></div><div class="small muted">' + big.map(x => esc(x.name) + ' ' + fm(x.amt)).join(' · ') + (u.ev.length > 3 ? ' 외 ' + (u.ev.length - 3) + '건' : '') + '</div></li>';
     }).join('') : '<li class="muted small">12개월 안에 예정된 큰 일정이 없습니다.</li>';
-    main.innerHTML =
+    main.innerHTML = checksHtml() +
       '<section class="card hero"><div class="l">우리집 순자산 · ' + sim.ym[cur] + ' 말 예상</div><div class="v">' + fm(sim.networth[cur]) + '</div>' +
       '<div class="hero-split"><div><span>금융자산</span><b>' + fm(fin) + '</b></div><div><span>집·보증금·차</span><b>' + fm(prop) + '</b></div><div><span>부채</span><b>−' + fm(sim.debt[cur]) + '</b></div></div></section>' +
       '<div class="grid g2">' + budgetCard(sim, cur) +
@@ -398,7 +416,7 @@
       const t = sim.ym.indexOf(e.date), eff = A.eventNwEffect(e), first = e.date !== prevYm; prevYm = e.date;
       return '<tr><td>' + (first ? esc(e.date) : '') + '</td><td>' + esc(e.name) + (e.certain === 'Y' ? '' : ' <span class="badge plain">추정</span>') + '</td><td class="r">' + signed(num(e.amount, 0)) + '</td><td class="r">' + (eff === 0 ? '<span class="muted">자산 전환</span>' : signed(eff)) + '</td><td class="r">' + (first && t > 0 ? signed(sim.networth[t] - sim.networth[t - 1]) : '') + '</td><td class="r">' + (first && t >= 0 ? '<b>' + fm(sim.networth[t]) + '</b>' : '') + '</td></tr>';
     }).join('');
-    main.innerHTML = pageHead('현금 일정', '앞으로 12개월 동안 들어오고 나가는 돈과 큰 일정을 월별로 봅니다. 일정은 [관리 > 큰 일정]에서 고칩니다.', link('큰 일정 고치기', 'manage', 'events')) +
+    main.innerHTML = pageHead('현금 일정', '앞으로 12개월 동안 들어오고 나가는 돈과 큰 일정을 월별로 봅니다. 일정은 [관리 > 큰 일정]에서 고칩니다.', link('큰 일정 고치기', 'manage', 'events')) + checksHtml() +
       '<section class="card"><h2>현금이 가장 빠듯한 달</h2>' + rs.html + '</section>' +
       '<section class="card"><div class="row-between"><h2>월별 들어오는 돈 · 나가는 돈</h2><span class="small muted">만원</span></div>' + sheetHtml +
       '<p class="legend-note">월초 현금 + 들어오는 돈 − 나가는 돈 = 월말 현금이 되도록 맞춘 장부입니다. 큰 일정이 있는 달은 펼쳐 두었습니다. 월중 저점은 큰 지출이 월급날(25일)보다 먼저 나간다고 보고 추정한 값입니다.</p></section>' +
@@ -744,7 +762,7 @@
     }
     const [tab, title, desc] = MANAGE_INFO[s];
     main.innerHTML = pageHead('관리', '가진 돈, 수입, 정해진 지출, 대출, 큰 일정을 입력하는 곳입니다. 항목을 누르면 펼쳐서 고칠 수 있습니다.') + subnav('manage') +
-      (s === 'holdings' ? priceStatusHtml() : '') +
+      (s === 'holdings' ? priceStatusHtml() : '') + (s === 'debts' ? checksHtml() : '') +
       '<section class="card"><h2>' + title + '</h2><p class="small muted">' + desc + '</p>' + editList(tab, st.data[tab] || []) + '</section>';
     if (st.openId) { const d = main.querySelector('details[data-id="' + st.openId + '"] input'); if (d) d.focus(); st.openId = null; }
   }

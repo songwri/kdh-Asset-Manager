@@ -170,8 +170,8 @@
         const k = Math.max(0, Math.min(n, start - s - 1));
         bal = amortBalance(P, r, n, k);
       } else if (!disburse) bal = P;
-      return { name: d.name, P, r, n, s: s == null ? start : s, disburse, bal, pmt: payment(P, r, n) };
-    });
+      return { name: d.name, P, r, n, s: s == null ? start : s, disburse, bal, pmt: payment(P, r, n), bad: disburse && s == null };
+    }).filter(d => !d.bad); // 실행 월이 없는 대출은 계산에서 빼고 화면에서 경고
 
     // 이벤트
     const evByIdx = {};
