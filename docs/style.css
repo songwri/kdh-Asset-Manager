@@ -263,3 +263,26 @@ select.auto { width: auto; }
 #toast.err { background: var(--risk); color: #fff; }
 @media (max-width: 800px) { #toast { bottom: calc(84px + env(safe-area-inset-bottom)); } .page-head { flex-direction: column; align-items: flex-start; } .page-head h1 { font-size: 21px; } }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; scroll-behavior: auto !important; } }
+
+/* 월별 장부 (들어오는 돈 · 나가는 돈) */
+.msheet { border-top: 1px solid var(--line); }
+.msheet:last-of-type { border-bottom: 1px solid var(--line); }
+.msheet > summary { list-style: none; display: grid; grid-template-columns: 1.3fr 1.6fr 1fr; gap: 10px; align-items: center; padding: 12px 4px; cursor: pointer; font-variant-numeric: tabular-nums; }
+.msheet > summary::-webkit-details-marker { display: none; }
+.msheet > summary:hover, .msheet[open] > summary { background: var(--surface-2); }
+.msheet.risk > summary .ms-m b { color: var(--risk); }
+.ms-n { display: flex; gap: 12px; justify-content: flex-end; font-size: 14px; }
+.ms-e { text-align: right; } .ms-e small { display: block; font-size: 11px; color: var(--muted); }
+.tacct { display: grid; grid-template-columns: 1fr 1fr; gap: 0; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; margin: 6px 4px 10px; }
+.tcol { padding: 10px 14px; } .tcol.in { border-right: 1px solid var(--line); }
+.tcol h4 { margin: 0 0 6px; font-size: 12px; font-weight: 600; color: var(--text-2); }
+.tcol ul { list-style: none; margin: 0; padding: 0; }
+.tcol li { display: flex; justify-content: space-between; gap: 10px; padding: 4px 0; font-size: 14px; font-variant-numeric: tabular-nums; }
+.tcol li em { font-style: normal; font-size: 11px; color: var(--muted); }
+.ttotal { display: flex; justify-content: space-between; border-top: 1px solid var(--line); margin-top: 6px; padding-top: 8px; font-variant-numeric: tabular-nums; }
+.tflow { display: flex; flex-wrap: wrap; gap: 6px 18px; padding: 0 6px 14px; font-size: 13px; color: var(--text-2); font-variant-numeric: tabular-nums; }
+.tflow b { color: var(--text); }
+@media (max-width: 600px) {
+  .tacct { grid-template-columns: 1fr; } .tcol.in { border-right: 0; border-bottom: 1px solid var(--line); }
+  .msheet > summary { grid-template-columns: 1fr auto; } .ms-n { grid-column: 1 / -1; justify-content: flex-start; order: 3; font-size: 13px; }
+}
