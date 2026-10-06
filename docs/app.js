@@ -43,9 +43,10 @@
   };
   /** 가족 이름은 코드에 넣지 않고 시트 설정(name_me, name_wife)에서 읽는다 (저장소가 공개라서) */
   function names() { const S = st.data ? E.settings(st.data) : {}; return { me: S.name_me || '나', wife: S.name_wife || '배우자', child: S.name_child || '아이' }; }
-  /** 내 나이 → 그때 아이 나이 (연 나이 기준) */
-  function kidAge(myAge) { const S = E.settings(st.data); return myAge - (S.child_birth_year - S.birth_me); }
-  const kidTag = myAge => ' (' + names().child + ' ' + kidAge(myAge) + '세)';
+  /** 내 나이 → 그해 아이 나이 (한국식: 학년을 가늠하기 쉽게) */
+  function kidAge(myAge) { return A.kidKAge(E.settings(st.data), myAge); }
+  const kidStageOf = myAge => A.kidStage(kidAge(myAge));
+  const kidTag = myAge => { const st2 = kidStageOf(myAge); return ' (' + names().child + ' ' + kidAge(myAge) + '세' + (st2 ? '·' + st2 : '') + ')'; };
   function applyNames() { const n = names(); OPT.owner = [['me', n.me], ['wife', n.wife], ['joint', '공동']]; return n; }
   /** 화면 문구 속 '본인'·'와이프'를 실제 이름으로 바꾼다 */
   function nameTexts(root) {
@@ -842,6 +843,19 @@
       '<p class="legend-note">손익은 현재가 기준입니다. 시세 코드가 있는 종목은 1시간마다 현재가가 자동으로 바뀝니다.</p></section>' + (card ? noteCard(card) : '');
   }
 
+  /** 자녀 학교 시점별 우리 나이와 그해 말 예상 순자산·금융자산 */
+  function kidMilestoneCard(sim) {
+    const S = sim.S, n = names(), ms = A.kidMilestones(S);
+    const rows = ms.map(m => {
+      const t = Math.max(0, Math.min(sim.N - 1, sim.ym.indexOf(m.ym)));
+      const inRange = sim.ym.indexOf(m.ym) >= 0, past = m.ym < sim.ym[0];
+      return '<tr><td>' + esc(m.label) + '</td><td>' + m.ym.replace('-', '.') + '</td><td class="r">' + m.kid + '세</td><td class="r">' + m.me + '세</td><td class="r">' + m.wife + '세</td>' +
+        '<td class="r">' + (inRange && !past ? fm(sim.networth[t]) : dash) + '</td><td class="r">' + (inRange && !past ? fm(sim.cash[t] + sim.reserve[t] + sim.invest[t]) : dash) + '</td></tr>';
+    }).join('');
+    return '<section class="card"><h2>' + esc(n.child) + ' 주요 시점</h2><div class="tbl-wrap mini"><table><thead><tr><th>시점</th><th>연월</th><th class="r">' + esc(n.child) + '</th><th class="r">본인</th><th class="r">와이프</th><th class="r">순자산</th><th class="r">금융자산</th></tr></thead><tbody>' + rows + '</tbody></table></div>' +
+      '<p class="legend-note">' + esc(n.child) + ' 나이는 한국식(그해 연도 − 출생연도 + 1)입니다. 8세 3월 초등학교 입학, 6년 뒤 중학교, 3년 뒤 고등학교, 20세 대학교 입학 기준입니다. 본인·와이프 나이는 그해 연도 − 출생연도입니다. 금액은 위 가정으로 계산한 그달 말 예상값입니다.</p></section>';
+  }
+
   /* 은퇴·미래 */
   const SIM_FIELDS = [['retire_age_me', '본인 은퇴 나이'], ['retire_age_wife', '와이프 은퇴 나이'], ['house_mean', '집값 연평균 %'], ['house_vol', '집값 변동폭 %'], ['house_seed', '변동 경로 번호'], ['invest_return', '투자수익률 %'], ['inflation', '물가상승률 %'], ['salary_growth', '연봉상승률 %']];
   function renderSim() {
@@ -858,18 +872,19 @@
       let inc = 0, exp = 0;
       for (let t = a; t < b; t++) { inc += sim.income[t]; exp += sim.expFixed[t] + sim.expVar[t] + sim.debtPay[t]; }
       const t = b - 1;
-      yrs.push({ y: sim.ym[a].slice(0, 4), age: sim.ageMe[t], inc, exp, nw: sim.networth[t], fin: sim.cash[t] + sim.reserve[t] + sim.invest[t], house: sim.house[t] + sim.re[t], debt: sim.debt[t], short: sim.short[t] > 0.5 });
+      yrs.push({ y: sim.ym[a].slice(0, 4), age: sim.ageMe[a], inc, exp, nw: sim.networth[t], fin: sim.cash[t] + sim.reserve[t] + sim.invest[t], house: sim.house[t] + sim.re[t], debt: sim.debt[t], short: sim.short[t] > 0.5 });
     }
     subEl().innerHTML =
       '<section class="card"><h2>가정 바꿔보기</h2><div class="ctl">' + SIM_FIELDS.map(([k, l]) => '<div><label class="f" for="sim_' + k + '">' + l + '</label><input id="sim_' + k + '" data-sim="' + k + '" inputmode="decimal" value="' + esc(S[k]) + '"></div>').join('') +
       '</div><div class="toolbar"><button class="primary" id="simRun">다시 계산</button><button id="simSave">이 가정을 저장</button><button class="ghost" id="simReset">처음 값으로</button></div>' +
       '<p class="small muted">집값은 평균이 정확히 ' + S.house_mean + '%가 되도록 만든 가상의 오르내림입니다. 경로 번호를 바꾸면 다른 흐름이 나옵니다. 예측이 아니라 가정에 따른 계산입니다.</p></section>' +
+      kidMilestoneCard(sim) +
       '<section class="card"><h2>순자산 30년</h2><div class="chart-box tall"><canvas id="simChart" role="img" aria-label="순자산 시뮬레이션"></canvas></div></section>' +
       '<section class="card"><h2>은퇴 시기별 비교</h2><div class="tbl-wrap"><table><thead><tr><th>은퇴 나이</th><th class="r">금융자산 바닥나는 나이</th><th class="r">10년 후 순자산</th><th class="r">20년 후 순자산</th><th class="r">65세' + kidTag(65) + ' 순자산</th><th class="r">65세 금융자산</th></tr></thead><tbody>' +
       sc.map(s => '<tr><td>' + esc(s.label) + '</td><td class="r ' + (s.depleteAge ? 'neg' : 'pos') + '">' + (s.depleteAge ? s.depleteAge + '세' + kidTag(s.depleteAge) : '바닥나지 않음') + '</td><td class="r">' + fm(s.nw10) + '</td><td class="r">' + fm(s.nw20) + '</td><td class="r">' + fm(s.nw65) + '</td><td class="r">' + fm(s.fin65) + '</td></tr>').join('') + '</tbody></table></div>' +
       '<p class="legend-note">금융자산 = 현금 + 비상금 + 투자(IRP 포함), 부채 차감. 집 매각·주택연금은 넣지 않았고 국민연금은 임시 추정값입니다. 본인 88세까지 봅니다.</p></section>' +
       '<section class="card"><h2>연도별 표</h2><div class="tbl-wrap mini"><table><thead><tr><th>연도</th><th class="r">본인 나이</th><th class="r">' + names().child + ' 나이</th><th class="r">수입</th><th class="r">지출(대출 포함)</th><th class="r">순자산</th><th class="r">금융자산</th><th class="r">집</th><th class="r">부채</th></tr></thead><tbody>' +
-      yrs.map(r => '<tr><td>' + r.y + '</td><td class="r">' + r.age + '</td><td class="r">' + kidAge(r.age) + '</td><td class="r">' + fm(r.inc) + '</td><td class="r">' + fm(r.exp) + '</td><td class="r"><b>' + fm(r.nw) + '</b></td><td class="r' + (r.short ? ' neg' : '') + '">' + fm(r.fin) + '</td><td class="r">' + fm(r.house) + '</td><td class="r">' + fm(r.debt) + '</td></tr>').join('') + '</tbody></table></div></section>';
+      yrs.map(r => '<tr><td>' + r.y + '</td><td class="r">' + r.age + '</td><td class="r">' + kidAge(r.age) + (kidStageOf(r.age) ? ' <span class="muted small">' + kidStageOf(r.age) + '</span>' : '') + '</td><td class="r">' + fm(r.inc) + '</td><td class="r">' + fm(r.exp) + '</td><td class="r"><b>' + fm(r.nw) + '</b></td><td class="r' + (r.short ? ' neg' : '') + '">' + fm(r.fin) + '</td><td class="r">' + fm(r.house) + '</td><td class="r">' + fm(r.debt) + '</td></tr>').join('') + '</tbody></table></div></section>';
     nwCharts('simChart', sim);
   }
 
@@ -930,12 +945,12 @@
     if (E.idxOf(ym) < sa.earliestIdx) { ym = sa.earliestYm; ymNote = '입력한 월이 실거주 2년 이전이라 가장 빠른 시점으로 바꿨습니다.'; }
     const cmp = A.afterSaleCompare(st.data, over, ym);
     const later = sa.hit ? sa.monthly.find(m => m.idx === sa.hit.idx + 24) : null;
-    const yRows = sa.yearly.slice(0, 27).map(r => '<tr' + (r.price >= S.house_target ? ' class="hl"' : '') + '><td>' + r.ym + '</td><td class="r">' + r.age + '세</td><td class="r">' + kidAge(r.age) + '세</td><td class="r">' + fm(r.price) + '</td><td class="r">' + Math.round(r.price / S.house_target * 100) + '%</td><td class="r">' + fm(-r.tax) + '</td><td class="r">' + fm(-r.fee) + '</td><td class="r">' + fm(-r.repay) + '</td><td class="r"><b>' + fm(r.net) + '</b></td><td class="r">' + (r.annual * 100).toFixed(1) + '%</td></tr>').join('');
+    const yRows = sa.yearly.slice(0, 27).map(r => '<tr' + (r.price >= S.house_target ? ' class="hl"' : '') + '><td>' + r.ym + '</td><td class="r">' + r.age + '세</td><td class="r">' + kidAge(r.age) + '세' + (kidStageOf(r.age) ? ' <span class="muted small">' + kidStageOf(r.age) + '</span>' : '') + '</td><td class="r">' + fm(r.price) + '</td><td class="r">' + Math.round(r.price / S.house_target * 100) + '%</td><td class="r">' + fm(-r.tax) + '</td><td class="r">' + fm(-r.fee) + '</td><td class="r">' + fm(-r.repay) + '</td><td class="r"><b>' + fm(r.net) + '</b></td><td class="r">' + (r.annual * 100).toFixed(1) + '%</td></tr>').join('');
     const col = fn => cmp.map(c => '<td class="r">' + fn(c) + '</td>').join('');
     const hasSale = c => !!c.sale;
     subEl().innerHTML =
       '<section class="card"><h2>목표 매도가 ' + fm(S.house_target) + '</h2>' +
-      (sa.hit ? '<div class="big-num">' + sa.hit.ym + ' <span class="small muted">본인 ' + sa.hit.age + '세 · ' + names().child + ' ' + kidAge(sa.hit.age) + '세 · 집값 ' + fm(sa.hit.price) + '</span></div>' +
+      (sa.hit ? '<div class="big-num">' + sa.hit.ym + ' <span class="small muted">본인 ' + sa.hit.age + '세 · ' + names().child + ' ' + kidAge(sa.hit.age) + '세' + (kidStageOf(sa.hit.age) ? '(' + kidStageOf(sa.hit.age) + ')' : '') + ' · 집값 ' + fm(sa.hit.price) + '</span></div>' +
         '<p class="small">양도세 ' + fm(sa.hit.tax) + ' · 중개보수 ' + fm(sa.hit.fee) + ' · 대출 상환 ' + fm(sa.hit.repay) + ' → <b>손에 쥐는 돈 ' + fm(sa.hit.net) + '</b></p>' :
         '<div class="note warn"><div class="body">지금 가정(연평균 ' + S.house_mean + '%)으로는 목표가에 닿지 않습니다. 목표가를 낮추거나 [은퇴·미래]에서 상승률을 바꿔 보세요.</div></div>') +
       '<ul class="plain">' +

@@ -257,7 +257,7 @@
     // 9. 은퇴 시나리오
     if (ctx.scenarios && ctx.scenarios.length) {
       const base = ctx.scenarios.find(s => s.isBase) || ctx.scenarios[0];
-      const kid = a => a - (S.child_birth_year - S.birth_me);
+      const kid = a => kidKAge(S, a);
       const items = ctx.scenarios.map(s => s.label + ': ' + (s.depleteAge ? '금융자산 ' + s.depleteAge + '세(아이 ' + kid(s.depleteAge) + '세)에 소진' : '90세 전후까지 소진 없음') + ' · 65세(아이 ' + kid(65) + '세) 순자산 ' + fm(s.nw65));
       items.push('집 매각·주택연금, 국민연금 실제 수령액, 연금저축 수령은 반영하지 않았습니다. 보수적인 수치입니다.');
       add(base.depleteAge ? 'warn' : 'info', '은퇴', '은퇴 시기별 비교', '[분석 > 은퇴·미래]에서 나이를 바꿔 직접 비교해 보세요.', items);
@@ -363,7 +363,29 @@
     });
   }
 
-  const api = { FIXED_CATS, eventNwEffect, fundingPlan, sellAnalysis, afterSaleCompare, fm, pct, holdingsReport, prepayEffect, monthStats, ledgerMonths, budgetCap, allocate, advise, isFixedCat, curIdx };
+  /* ---------- 자녀 나이 (한국식: 그해 연도 − 출생연도 + 1) · 학교 단계 ---------- */
+  /** 내 나이(연도 − 내 출생연도) → 그해 자녀 한국식 나이 */
+  const kidKAge = (S, myAge) => myAge - (S.child_birth_year - S.birth_me) + 1;
+  /** 한국식 나이 → 학년. 8세 초등 입학, 6년 뒤 중학교, 고등학교, 20세 대학 */
+  function kidStage(k) {
+    if (k < 5) return k >= 1 ? '어린이집' : '';
+    if (k <= 7) return '유치원';
+    if (k <= 13) return '초' + (k - 7);
+    if (k <= 16) return '중' + (k - 13);
+    if (k <= 19) return '고' + (k - 16);
+    if (k <= 23) return '대학';
+    return '';
+  }
+  /** 자녀 주요 시점 (각 해 3월 입학 기준) */
+  function kidMilestones(S) {
+    const y0 = S.child_birth_year;
+    return [['초등학교 입학', 7], ['중학교 입학', 13], ['고등학교 입학', 16], ['대학교 입학', 19], ['대학교 졸업 (4년 가정)', 23]].map(([label, d]) => {
+      const y = y0 + d;
+      return { label, ym: y + (label.indexOf('졸업') >= 0 ? '-02' : '-03'), kid: y - y0 + 1, me: y - S.birth_me, wife: y - S.birth_wife };
+    });
+  }
+
+  const api = { kidKAge, kidStage, kidMilestones, FIXED_CATS, eventNwEffect, fundingPlan, sellAnalysis, afterSaleCompare, fm, pct, holdingsReport, prepayEffect, monthStats, ledgerMonths, budgetCap, allocate, advise, isFixedCat, curIdx };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   g.Advisor = api;
 })(typeof window !== 'undefined' ? window : globalThis);
