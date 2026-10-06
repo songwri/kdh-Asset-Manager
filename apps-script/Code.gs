@@ -22,10 +22,11 @@ const TABS = {
   Debts:    ['id', 'name', 'principal', 'rate', 'term', 'start', 'disburse', 'note', 'active'],
   Events:   ['id', 'date', 'name', 'amount', 'category', 'certain', 'note', 'active'],
   Ledger:   ['id', 'date', 'type', 'amount', 'category', 'who', 'pay', 'memo'],
+  Recurring: ['id', 'name', 'type', 'amount', 'category', 'who', 'pay', 'day', 'start', 'end', 'last_ym', 'active'],
 };
 const NUM_COLS = ['amount', 'value', 'rate', 'qty', 'avg_price', 'price', 'principal', 'term'];
 const MONTH_COLS = ['start', 'end', 'pause_from', 'pause_to'];
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 3;
 const QUOTES_TAB = 'Quotes';
 const LOG_TAB = 'Log';
 const MIN_MANUAL_INTERVAL_MS = 5 * 60 * 1000;
@@ -170,7 +171,8 @@ function route_(req) {
 
 function sheet_(tab) {
   if (!TABS[tab]) throw new Error('unknown tab');
-  const sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(tab);
+  let sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(tab);
+  if (!sh) { CacheService.getScriptCache().remove('schema_v' + SCHEMA_VERSION); ensureSchema_(); sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(tab); }
   if (!sh) throw new Error('탭이 없습니다: ' + tab + ' (시트 초기화를 먼저 실행하세요)');
   return sh;
 }
@@ -284,9 +286,9 @@ function ensureSchema_() {
   if (cache.get(key)) return;
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   Object.keys(TABS).forEach(function (name) {
-    const sh = ss.getSheetByName(name);
-    if (!sh) return;
+    let sh = ss.getSheetByName(name);
     const h = TABS[name];
+    if (!sh) { sh = ss.insertSheet(name); sh.setFrozenRows(1); } // 새로 생긴 탭(예: Recurring)은 자동으로 만든다
     const cur = sh.getRange(1, 1, 1, h.length).getValues()[0];
     if (cur.join('|') !== h.join('|')) {
       sh.getRange(1, 1, 1, h.length).setValues([h]).setFontWeight('bold').setBackground('#eef2f7');

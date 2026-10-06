@@ -55,8 +55,9 @@
 
   /* ---------- 가계부 ---------- */
   // 고정비 분류: 생활비 상한 계산에서 빠진다 (예전 '고정-…' 분류도 고정비로 본다)
-  const FIXED_CATS = ['관리비', '공과금', '통신비', '구독', '보험', '교육/양육', '대출/할부', '기타고정'];
-  const isFixedCat = c => /^고정/.test(String(c || '')) || FIXED_CATS.indexOf(String(c || '')) >= 0;
+  const FIXED_CATS = ['관리비', '공과금', '통신비', '구독', '보험', '세금', '교육/양육', '대출/할부', '기타고정'];
+  // '○○ 교육'(아이 유치원·학원)도 고정비로 본다
+  const isFixedCat = c => /^고정/.test(String(c || '')) || / 교육$/.test(String(c || '')) || FIXED_CATS.indexOf(String(c || '')) >= 0;
   const toMan = v => num(v, 0) / 10000;
 
   function monthStats(ledger, ym) {
@@ -256,7 +257,8 @@
     // 9. 은퇴 시나리오
     if (ctx.scenarios && ctx.scenarios.length) {
       const base = ctx.scenarios.find(s => s.isBase) || ctx.scenarios[0];
-      const items = ctx.scenarios.map(s => s.label + ': ' + (s.depleteAge ? '금융자산 ' + s.depleteAge + '세에 소진' : '90세 전후까지 소진 없음') + ' · 65세 순자산 ' + fm(s.nw65));
+      const kid = a => a - (S.child_birth_year - S.birth_me);
+      const items = ctx.scenarios.map(s => s.label + ': ' + (s.depleteAge ? '금융자산 ' + s.depleteAge + '세(아이 ' + kid(s.depleteAge) + '세)에 소진' : '90세 전후까지 소진 없음') + ' · 65세(아이 ' + kid(65) + '세) 순자산 ' + fm(s.nw65));
       items.push('집 매각·주택연금, 국민연금 실제 수령액, 연금저축 수령은 반영하지 않았습니다. 보수적인 수치입니다.');
       add(base.depleteAge ? 'warn' : 'info', '은퇴', '은퇴 시기별 비교', '[분석 > 은퇴·미래]에서 나이를 바꿔 직접 비교해 보세요.', items);
     }

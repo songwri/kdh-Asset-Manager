@@ -299,3 +299,16 @@ select.auto { width: auto; }
 @media (max-width: 480px) { .rs { grid-template-columns: repeat(3, 1fr); } .rs-cell { padding: 8px 7px; } .rs-cell .io { font-size: 11px; } .rs-cell .a { font-size: 13px; } }
 .chip-label { font-size: 12px; color: var(--text-2); margin: 10px 0 -4px; }
 .chip.fixed { border-style: dashed; }
+.chip.kid { background: var(--info-bg); border-color: transparent; }
+.chip.kid.on { background: var(--ink); color: var(--ink-on); }
+li.ledit { display: block !important; padding: 10px 0 !important; }
+.paste-card > summary { list-style: none; cursor: pointer; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; }
+.paste-card > summary::-webkit-details-marker { display: none; }
+.paste-card > summary h2 { margin: 0; }
+.paste-card[open] > summary { margin-bottom: 10px; }
+textarea { font: inherit; font-size: 15px; width: 100%; border: 1px solid var(--line); border-radius: 8px; padding: 10px; background: var(--surface); color: var(--text); }
+table.paste tr.off td { color: var(--muted); }
+table.paste select { padding: 4px 4px; font-size: 13px; min-width: 0; max-width: 108px; }
+table.paste th, table.paste td { padding: 6px 4px; font-size: 13px; }
+table.paste td:nth-child(3) { white-space: normal; word-break: keep-all; }
+.li-act { display: flex; gap: 4px; }

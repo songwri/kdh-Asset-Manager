@@ -18,7 +18,7 @@
   const TABS = [['home', '홈'], ['ledger', '가계부'], ['flow', '현금 일정'], ['analysis', '분석'], ['manage', '관리']];
   const SUBNAV = {
     analysis: [['advice', '추천'], ['invest', '투자 점검'], ['future', '은퇴·미래'], ['tesla', '테슬라·자금'], ['sell', '집 매도']],
-    manage: [['assets', '자산·현금'], ['holdings', '투자 종목'], ['income', '수입'], ['expenses', '고정 지출'], ['debts', '대출·할부'], ['events', '큰 일정'], ['settings', '가정값'], ['connect', '연결·보안']],
+    manage: [['assets', '자산·현금'], ['holdings', '투자 종목'], ['income', '수입'], ['expenses', '고정 지출'], ['debts', '대출·할부'], ['events', '큰 일정'], ['recurring', '자동 기록'], ['settings', '가정값'], ['connect', '연결·보안']],
   };
   const ICONS = {
     home: '<path d="M3 11l9-8 9 8v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/>',
@@ -37,17 +37,22 @@
     grow: [['', '금액 고정'], ['Y', '연봉 상승률만큼 증가'], ['I', '물가만큼 증가']],
     assetCat: [['cash', '입출금·예금 (바로 사용)'], ['deposit', '예금·적금 (만기 있음)'], ['emergency', '비상금 (손대지 않는 돈)'], ['irp', 'IRP·연금'], ['isa', 'ISA 현금'], ['invest', '기타 투자'], ['lease', '전세보증금 (내가 맡긴 돈)'], ['prepaid', '집 계약 선납금'], ['car', '자동차'], ['real_estate', '보유 부동산'], ['other', '기타']],
     evCat: [['house_pay', '집값 납부'], ['lease_return', '전세금 돌려받음'], ['tax', '세금'], ['fee', '수수료'], ['move', '이사·임시거주'], ['interior', '인테리어'], ['car', '자동차'], ['other', '기타']],
+    ltype: [['expense', '지출'], ['income', '수입']],
+    pay: [['카드', '카드'], ['현금', '현금'], ['이체', '이체']],
     account: [['일반', '일반 계좌'], ['ISA', 'ISA'], ['IRP', 'IRP'], ['연금저축', '연금저축'], ['기타', '기타']],
   };
   /** 가족 이름은 코드에 넣지 않고 시트 설정(name_me, name_wife)에서 읽는다 (저장소가 공개라서) */
-  function names() { const S = st.data ? E.settings(st.data) : {}; return { me: S.name_me || '나', wife: S.name_wife || '배우자' }; }
+  function names() { const S = st.data ? E.settings(st.data) : {}; return { me: S.name_me || '나', wife: S.name_wife || '배우자', child: S.name_child || '아이' }; }
+  /** 내 나이 → 그때 아이 나이 (연 나이 기준) */
+  function kidAge(myAge) { const S = E.settings(st.data); return myAge - (S.child_birth_year - S.birth_me); }
+  const kidTag = myAge => ' (' + names().child + ' ' + kidAge(myAge) + '세)';
   function applyNames() { const n = names(); OPT.owner = [['me', n.me], ['wife', n.wife], ['joint', '공동']]; return n; }
   /** 화면 문구 속 '본인'·'와이프'를 실제 이름으로 바꾼다 */
   function nameTexts(root) {
     const n = names();
-    if (n.me === '나' && n.wife === '배우자') return;
+    if (n.me === '나' && n.wife === '배우자' && n.child === '아이') return;
     const w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
-    let x; while ((x = w.nextNode())) { if (/와이프|본인/.test(x.nodeValue)) x.nodeValue = x.nodeValue.replace(/와이프/g, n.wife).replace(/본인/g, n.me); }
+    let x; while ((x = w.nextNode())) { if (/와이프|본인|아이 \d/.test(x.nodeValue)) x.nodeValue = x.nodeValue.replace(/와이프/g, n.wife).replace(/본인/g, n.me).replace(/아이 (\d)/g, n.child + ' $1'); }
   }
   const optLabel = (o, v) => { const f = (OPT[o] || []).find(x => x[0] === String(v == null ? '' : v)); return f ? f[1] : (v || ''); };
 
@@ -69,6 +74,9 @@
       F('start', '실행 월', 'month', { hint: '다음 달부터 상환' }), F('disburse', '실행할 때 돈이 들어옴', 'sel', { opt: 'yn', hint: '대출은 예, 카드 할부는 아니오' }), F('note', '메모', 'text'), F('active', '계산', 'sel', { opt: 'active' })],
     Events: [F('date', '월', 'month'), F('name', '내용', 'text', { ph: '예: 주택 잔금' }), F('amount', '금액', 'num', { unit: '만원', hint: '나가는 돈은 앞에 − (예: -6200)' }), F('category', '종류', 'sel', { opt: 'evCat' }),
       F('certain', '확정된 일정', 'sel', { opt: 'yn' }), F('note', '메모', 'text'), F('active', '계산', 'sel', { opt: 'active' })],
+    Recurring: [F('name', '이름', 'text', { ph: '예: 넷플릭스' }), F('type', '구분', 'sel', { opt: 'ltype' }), F('amount', '금액', 'num', { unit: '원' }), F('category', '가계부 분류', 'text', { list: 'ledCats' }),
+      F('day', '매달 며칠', 'num', { unit: '일', hint: '그 날짜가 지나면 가계부에 자동으로 적힙니다 (31 = 말일)' }), F('who', '누구', 'sel', { opt: 'owner' }), F('pay', '결제', 'sel', { opt: 'pay' }),
+      F('start', '시작 월', 'month', { hint: '비우면 이번 달부터' }), F('end', '끝나는 월', 'month', { hint: '비우면 계속' }), F('active', '사용', 'sel', { opt: 'active' })],
   };
   const DEFAULT_ROW = {
     Income: { owner: 'me', kind: 'monthly', grow: '', retire_stop: 'N', active: 'Y' },
@@ -77,6 +85,7 @@
     Holdings: { account: '일반', owner: 'me', active: 'Y' },
     Debts: { disburse: 'N', active: 'Y' },
     Events: { category: 'other', certain: 'Y', active: 'Y' },
+    Recurring: { type: 'expense', who: 'me', pay: '카드', day: 1, active: 'Y' },
   };
   const periodTxt = r => {
     const k = String(r.kind || 'monthly');
@@ -90,6 +99,7 @@
     Assets: r => [esc(r.name || '새 자산'), optLabel('assetCat', r.category) + ' · ' + optLabel('owner', r.owner), fm(num(r.value, 0))],
     Holdings: r => [esc(r.name || '새 종목'), optLabel('account', r.account) + ' · ' + won(r.qty) + '주 · 현재가 ' + won(r.price) + '원' + (r.symbol ? ' · ' + esc(r.symbol) : ' · 시세 코드 없음'), fm(num(r.qty, 0) * num(r.price, 0) / 10000)],
     Debts: r => [esc(r.name || '새 대출'), num(r.rate, 0) + '% · ' + num(r.term, 0) + '개월 · 실행 ' + esc(r.start || '(월 없음)') + (E.isY(r.disburse) ? ' · 실행 때 입금' : ' · 입금 없음'), fm(num(r.principal, 0))],
+    Recurring: r => [esc(r.name || '새 자동 기록'), '매달 ' + (num(r.day, 1) >= 31 ? '말일' : num(r.day, 1) + '일') + ' · ' + esc(r.category || '분류 없음') + ' · ' + optLabel('owner', r.who) + (r.last_ym ? ' · 마지막 ' + esc(r.last_ym) : ''), (r.type === 'income' ? '+' : '') + won(r.amount) + '원'],
     Events: r => [esc(r.name || '새 일정'), esc(r.date || '') + ' · ' + optLabel('evCat', r.category) + (r.certain === 'Y' ? '' : ' · 추정'), signedTxt(num(r.amount, 0))],
   };
   const MANAGE_INFO = {
@@ -98,13 +108,18 @@
     income: ['Income', '수입', '월급, 인센티브, 아동수당처럼 들어오는 돈입니다. 매달·매년·한 번만 중에서 고르고, 휴직처럼 쉬는 기간도 넣을 수 있습니다.'],
     expenses: ['Expenses', '고정 지출', '관리비, 유치원, 보험처럼 정해진 지출과 "생활비 기준값"을 적습니다. 매일 쓰는 돈은 [가계부]에 적습니다.'],
     debts: ['Debts', '대출·할부', '주택담보대출, 카드 할부처럼 갚아야 하는 돈입니다. 원리금균등 상환으로 계산합니다.'],
+    recurring: ['Recurring', '자동 기록', '구독료, 통신비, 관리비처럼 매달 같은 날 나가는 돈을 한 번만 등록하면, 그 날짜가 지난 뒤 앱을 열 때 가계부에 자동으로 적힙니다. 놓친 달도 최대 12개월까지 채웁니다.'],
     events: ['Events', '큰 일정', '계약금·잔금, 전세금 반환, 세금, 이사처럼 한 번에 크게 들어오거나 나가는 돈입니다. 나가는 돈은 금액 앞에 −를 붙입니다.'],
   };
-  const CATS_VAR = ['식비', '외식', '생활용품', '대중교통', '차량유지비', '의료', '여가·문화', '쇼핑/의류', '경조사/선물', '기타'];
-  const CATS_FIX = A.FIXED_CATS;
+  const CATS_VAR = ['식비', '외식', '생활용품', '대중교통', '차량유지비', '의료', '미용', '여가·문화', '여행', '쇼핑/의류', '경조사/선물', '기타'];
+  /** 자녀 분류는 이름을 붙여 직관적으로 (예: OO 물건). 교육비는 고정비로 본다 */
+  const kidCats = () => { const c = names().child; return [c + ' 물건', c + ' 병원', c + ' 놀이·체험']; };
+  const fixedCats = () => A.FIXED_CATS.map(c => c === '교육/양육' ? names().child + ' 교육' : c);
+  const allExpCats = () => CATS_VAR.concat(kidCats(), fixedCats());
+  const isKidCat = c => { const n = names().child; return String(c || '').indexOf(n + ' ') === 0 || /^(아이|자녀|육아|교육\/양육)/.test(String(c || '')); };
   const CATS_INC = ['월급', '인센티브', '부수입', '환급', '기타수입'];
   const SETTING_GROUPS = [
-    ['가족', [['name_me', '내 이름', ''], ['name_wife', '배우자 이름', ''], ['birth_me', '본인 출생연도', ''], ['birth_wife', '와이프 출생연도', ''], ['child_birth_year', '자녀 출생연도', ''], ['retire_age_me', '본인 은퇴 나이', '세'], ['retire_age_wife', '와이프 은퇴 나이', '세']]],
+    ['가족', [['name_me', '내 이름', ''], ['name_wife', '배우자 이름', ''], ['name_child', '자녀 이름', ''], ['birth_me', '본인 출생연도', ''], ['birth_wife', '와이프 출생연도', ''], ['child_birth_year', '자녀 출생연도', ''], ['retire_age_me', '본인 은퇴 나이', '세'], ['retire_age_wife', '와이프 은퇴 나이', '세']]],
     ['돈 관리 기준', [['liquidity_floor', '현금 경고선', '만원'], ['emergency_months', '비상금 목표', '개월치 생활비'], ['save_rate_target', '목표 저축률', '%'], ['variable_override', '실제 생활비 (0이면 계획값)', '만원/월']]],
     ['경제 가정', [['inflation', '물가상승률', '%'], ['salary_growth', '연봉 상승률', '%'], ['invest_return', '투자 기대수익률', '%'], ['cash_rate', '예금 금리', '%']]],
     ['집', [['house_purchase_ym', '잔금 월', 'YYYY-MM'], ['move_in_ym', '입주 월', 'YYYY-MM'], ['house_price', '매매가', '만원'], ['house_mean', '집값 연평균 상승률', '%'], ['house_vol', '집값 연 변동폭', '%'], ['house_target', '목표 매도가', '만원'], ['house_basis_extra', '취득 부대비용', '만원'], ['house_capex', '양도세 경비 인정 공사비', '만원'], ['sell_fee_pct', '매도 중개보수율', '%']]],
@@ -227,7 +242,7 @@
     loadPending().forEach(it => { const list = (st.data[it.tab] = st.data[it.tab] || []); if (!list.some(x => String(x.id) === String(it.row.id))) list.push(it.row); });
     $('#login').classList.add('hidden'); $('#app').classList.remove('hidden');
     status(''); renderTabs(); render();
-    setTimeout(flushPending, 300);
+    setTimeout(() => { runRecurring().then(flushPending); }, 300);
   }
   async function loadAll(fresh) {
     status('불러오는 중…');
@@ -275,7 +290,7 @@
   function nwCharts(id, sim) {
     const idx = [];
     for (let t = 0; t < sim.N; t++) if (t === 0 || (t + 1) % 12 === 0) idx.push(t);
-    const lab = idx.map(t => sim.ym[t].slice(0, 4) + ' (' + sim.ageMe[t] + '세)');
+    const lab = idx.map(t => sim.ym[t].slice(0, 4) + ' (' + sim.ageMe[t] + '세·' + names().child + ' ' + kidAge(sim.ageMe[t]) + '세)');
     const fin = t => sim.cash[t] + sim.reserve[t] + sim.invest[t];
     mkChart(id, lab, [
       { label: '순자산', data: idx.map(t => sim.networth[t]), borderColor: cssv('--text'), borderWidth: 3 },
@@ -356,6 +371,7 @@
       '<div class="erow-actions"><span class="small muted">입력하면 자동 저장됩니다</span><button class="ghost danger" data-del>삭제</button></div></details>').join('') :
       '<div class="empty">아직 입력한 항목이 없습니다. 아래 버튼으로 추가하세요.</div>';
     return '<datalist id="expCats">' + ['생활', '주거', '교육', '보험', '세금', '자동차', '통신', '고정'].map(c => '<option value="' + c + '">').join('') + '</datalist>' +
+      '<datalist id="ledCats">' + allExpCats().concat(CATS_INC).map(c => '<option value="' + esc(c) + '">').join('') + '</datalist>' +
       '<div class="elist" data-etab="' + tab + '">' + body + '</div><div class="toolbar"><button class="primary" data-add="' + tab + '">+ 추가</button></div>';
   }
 
@@ -432,7 +448,7 @@
       return '<li><div class="row-between"><b>' + sim.ym[u.k] + '</b><span>' + signed(tot) + '</span></div><div class="small muted">' + big.map(x => esc(x.name) + ' ' + fm(x.amt)).join(' · ') + (u.ev.length > 3 ? ' 외 ' + (u.ev.length - 3) + '건' : '') + '</div></li>';
     }).join('') : '<li class="muted small">12개월 안에 예정된 큰 일정이 없습니다.</li>';
     const S0 = E.settings(st.data);
-    const nameCard = !S0.name_me || !S0.name_wife ? '<section class="card"><h2>가족 이름 설정</h2><p class="small muted">화면에 "나·배우자" 대신 이름으로 보이게 합니다. 이름은 구글 시트에만 저장됩니다.</p><div class="form-row"><div><label class="f" for="nmMe">내 이름</label><input id="nmMe" value="' + esc(S0.name_me) + '"></div><div><label class="f" for="nmWife">배우자 이름</label><input id="nmWife" value="' + esc(S0.name_wife) + '"></div><div><button class="primary wide" id="saveNames">저장</button></div></div></section>' : '';
+    const nameCard = !S0.name_me || !S0.name_wife || !S0.name_child ? '<section class="card"><h2>가족 이름 설정</h2><p class="small muted">화면에 "나·배우자" 대신 이름으로 보이게 합니다. 이름은 구글 시트에만 저장됩니다.</p><div class="form-row"><div><label class="f" for="nmMe">내 이름</label><input id="nmMe" value="' + esc(S0.name_me) + '"></div><div><label class="f" for="nmWife">배우자 이름</label><input id="nmWife" value="' + esc(S0.name_wife) + '"></div><div><label class="f" for="nmKid">자녀 이름</label><input id="nmKid" value="' + esc(S0.name_child) + '"></div><div><button class="primary wide" id="saveNames">저장</button></div></div></section>' : '';
     main.innerHTML = checksHtml() + nameCard +
       '<section class="card hero"><div class="l">우리집 순자산 · ' + sim.ym[cur] + ' 말 예상</div><div class="v">' + fm(sim.networth[cur]) + '</div>' +
       '<div class="hero-split"><div><span>금융자산</span><b>' + fm(fin) + '</b></div><div><span>집·보증금·차</span><b>' + fm(prop) + '</b></div><div><span>부채</span><b>−' + fm(sim.debt[cur]) + '</b></div></div></section>' +
@@ -525,6 +541,9 @@
     const mrows = led.filter(r => String(r.date).slice(0, 7) === ym);
     const incTotal = mrows.filter(r => r.type === 'income').reduce((q, r) => q + num(r.amount, 0), 0);
     const expTotal = mrows.filter(r => r.type !== 'income').reduce((q, r) => q + num(r.amount, 0), 0);
+    const kidRows = mrows.filter(r => r.type !== 'income' && isKidCat(r.category));
+    const kidTotal = kidRows.reduce((q, r) => q + num(r.amount, 0), 0);
+    const kidBy = {}; kidRows.forEach(r => { kidBy[r.category] = (kidBy[r.category] || 0) + num(r.amount, 0); });
 
     // 일별 표
     const [yy, mm] = ym.split('-').map(Number);
@@ -546,7 +565,9 @@
     const dayHtml = dayList.map(x => {
       const head = '<span class="dd"><b>' + x.d + '일</b> <span class="muted">' + WD[x.wd] + '</span></span><span class="r">' + (x.inc ? '<span class="pos">+' + won(x.inc) + '</span>' : '<span class="muted">0</span>') + '</span><span class="r">' + (x.exp ? won(x.exp) : '<span class="muted">0</span>') + '</span><span class="r muted">' + won(x.cum) + '</span>';
       if (!x.items.length) return '<div class="day empty-day">' + head + '</div>';
-      return '<details class="day"><summary>' + head + '</summary><ul class="day-items">' + x.items.map(r => '<li data-lid="' + esc(r.id) + '"><span><b>' + esc(r.category) + '</b> <span class="muted">' + (r.who === 'wife' ? names().wife : names().me) + ' · ' + esc(r.pay || '') + (r.memo ? ' · ' + esc(r.memo) : '') + '</span></span><span class="r">' + (r.type === 'income' ? '<span class="pos">+' + won(r.amount) + '</span>' : won(r.amount)) + '</span><button class="ghost danger sm" data-ldel aria-label="삭제">삭제</button></li>').join('') + '</ul></details>';
+      const open = x.items.some(r => String(r.id) === st.editLid);
+      return '<details class="day"' + (open ? ' open' : '') + '><summary>' + head + '</summary><ul class="day-items">' + x.items.map(r => String(r.id) === st.editLid ? ledgerEditForm(r) :
+        '<li data-lid="' + esc(r.id) + '"><span><b>' + esc(r.category) + '</b>' + (/^rec_/.test(r.id) ? ' <span class="badge plain">자동</span>' : '') + ' <span class="muted">' + (r.who === 'wife' ? names().wife : names().me) + ' · ' + esc(r.pay || '') + (r.memo ? ' · ' + esc(r.memo) : '') + '</span></span><span class="r">' + (r.type === 'income' ? '<span class="pos">+' + won(r.amount) + '</span>' : won(r.amount)) + '</span><span class="li-act"><button class="ghost sm" data-ledit>수정</button><button class="ghost danger sm" data-ldel aria-label="삭제">삭제</button></span></li>').join('') + '</ul></details>';
     }).join('');
 
     const pend = loadPending().length;
@@ -558,18 +579,20 @@
       '<label class="qe-label" for="lgAmt">금액 (원)</label><input id="lgAmt" class="qe-amt" data-num="1" inputmode="numeric" placeholder="0">' +
       (st.ltype === 'income' ? '<div class="chips" role="group" aria-label="분류">' + cats.map(c => '<button type="button" class="chip" data-cat="' + c + '">' + c + '</button>').join('') + '</div>' :
         '<div class="chip-label">생활비</div><div class="chips" role="group" aria-label="생활비 분류">' + CATS_VAR.map(c => '<button type="button" class="chip" data-cat="' + c + '">' + c + '</button>').join('') + '</div>' +
-        '<div class="chip-label">고정비 <span class="muted">(생활비 상한에서 빠짐)</span></div><div class="chips" role="group" aria-label="고정비 분류">' + CATS_FIX.map(c => '<button type="button" class="chip fixed" data-cat="' + c + '">' + c + '</button>').join('') + '</div>') +
+        '<div class="chip-label">' + esc(names().child) + '에게 쓴 돈</div><div class="chips" role="group" aria-label="자녀 분류">' + kidCats().map(c => '<button type="button" class="chip kid" data-cat="' + esc(c) + '">' + esc(c) + '</button>').join('') + '</div>' +
+        '<div class="chip-label">고정비 <span class="muted">(생활비 상한에서 빠짐)</span></div><div class="chips" role="group" aria-label="고정비 분류">' + fixedCats().map(c => '<button type="button" class="chip fixed" data-cat="' + esc(c) + '">' + esc(c) + '</button>').join('') + '</div>') +
       '<div class="form-row">' +
-      '<div><label class="f" for="lgCat">분류</label><input id="lgCat" list="catList" placeholder="' + (st.ltype === 'income' ? '월급' : '식비') + '"><datalist id="catList">' + (st.ltype === 'income' ? CATS_INC : CATS_VAR.concat(CATS_FIX)).map(c => '<option value="' + c + '">').join('') + '</datalist></div>' +
+      '<div><label class="f" for="lgCat">분류</label><input id="lgCat" list="catList" placeholder="' + (st.ltype === 'income' ? '월급' : '식비') + '"><datalist id="catList">' + (st.ltype === 'income' ? CATS_INC : allExpCats()).map(c => '<option value="' + esc(c) + '">').join('') + '</datalist></div>' +
       '<div><label class="f" for="lgDate">날짜</label><input type="date" id="lgDate" value="' + todayStr() + '"></div>' +
       '<div><label class="f" for="lgPay">결제</label><select id="lgPay"><option>카드</option><option>현금</option><option>이체</option></select></div>' +
       '<div class="span2"><label class="f" for="lgMemo">메모</label><input id="lgMemo" placeholder="선택"></div>' +
       '<div class="span-all"><button class="primary wide" id="lgAdd">' + (st.ltype === 'income' ? '수입 추가' : '지출 추가') + '</button></div></div>' +
-      '</section>' +
+      '</section>' + pasteHtml() +
 
       '<section class="card"><div class="row-between"><h2>' + yy + '년 ' + mm + '월</h2><select id="lgMonth" class="auto">' + months.map(m => '<option' + (m === ym ? ' selected' : '') + '>' + m + '</option>').join('') + '</select></div>' +
       '<div class="sum3"><div><span>수입</span><b class="pos">' + won(incTotal) + '</b></div><div><span>지출</span><b>' + won(expTotal) + '</b></div><div><span>남은 돈</span><b class="' + (incTotal - expTotal < 0 ? 'neg' : '') + '">' + won(incTotal - expTotal) + '</b></div></div>' +
       '<p class="small muted">원 단위 · 지출 중 생활비(변동) ' + won(ms.variable * 10000) + ' / 고정 ' + won(ms.fixed * 10000) + '</p>' +
+      (kidTotal ? '<p class="small">' + esc(names().child) + '에게 쓴 돈 <b>' + won(kidTotal) + '원</b> <span class="muted">(' + Object.keys(kidBy).map(k => esc(k) + ' ' + won(kidBy[k])).join(' · ') + ')</span></p>' : '') +
       (isCur ? '<div class="small">생활비 상한 ' + fm(capNow) + ' 중 ' + Math.round(ratio * 100) + '% 사용' + (lvl === 'risk' ? ' — 초과' : lvl === 'warn' ? ' — 80% 넘음' : '') + '</div><div class="bar ' + lvl + '"><i style="width:' + Math.min(100, ratio * 100) + '%"></i></div>' : '') +
       '<h3 class="mt">일별 내역</h3>' +
       (dayList.length ? '<div class="daytable"><div class="day head"><span>날짜</span><span class="r">수입</span><span class="r">지출</span><span class="r">누적 지출</span></div>' + dayHtml +
@@ -602,6 +625,177 @@
     const label = (type === 'income' ? '수입 ' : '지출 ') + won(amt) + '원';
     toast(saved ? label + '을 기록했습니다.' : label + '을 이 기기에 보관했습니다. 연결되면 자동으로 저장합니다. (' + why + ')', saved ? '' : 'err');
     const a = $('#lgAmt'); if (a && st.data) a.focus();
+  }
+
+  /* ---------- 가계부 수정 ---------- */
+  function ledgerEditForm(r) {
+    const cats = r.type === 'income' ? CATS_INC : allExpCats();
+    const sel = (id, opts, v) => '<select id="' + id + '">' + opts.map(o => '<option value="' + esc(o[0]) + '"' + (String(v) === o[0] ? ' selected' : '') + '>' + esc(o[1]) + '</option>').join('') + '</select>';
+    return '<li class="ledit" data-lid="' + esc(r.id) + '"><div class="form-row">' +
+      '<div><label class="f" for="leAmt">금액 (원)</label><input id="leAmt" data-num="1" inputmode="numeric" value="' + esc(commaFmt(String(r.amount))) + '"></div>' +
+      '<div><label class="f" for="leCat">분류</label><input id="leCat" list="leCats" value="' + esc(r.category) + '"><datalist id="leCats">' + cats.map(c => '<option value="' + esc(c) + '">').join('') + '</datalist></div>' +
+      '<div><label class="f" for="leDate">날짜</label><input type="date" id="leDate" value="' + esc(String(r.date).slice(0, 10)) + '"></div>' +
+      '<div><label class="f" for="leType">구분</label>' + sel('leType', OPT.ltype, r.type === 'income' ? 'income' : 'expense') + '</div>' +
+      '<div><label class="f" for="leWho">누구</label>' + sel('leWho', [['me', names().me], ['wife', names().wife]], r.who === 'wife' ? 'wife' : 'me') + '</div>' +
+      '<div><label class="f" for="lePay">결제</label>' + sel('lePay', OPT.pay, r.pay || '카드') + '</div>' +
+      '<div class="span2"><label class="f" for="leMemo">메모</label><input id="leMemo" value="' + esc(r.memo || '') + '"></div>' +
+      '<div class="span-all toolbar"><button class="primary" data-lsave>저장</button><button class="ghost" data-lcancel>취소</button></div></div></li>';
+  }
+  async function saveLedgerEdit(id) {
+    const row = (st.data.Ledger || []).find(r => String(r.id) === id);
+    if (!row) return;
+    const amt = num($('#leAmt').value.replace(/[,\s]/g, ''), 0);
+    if (!amt) { toast('금액을 입력하세요.', 'err'); return; }
+    const date = $('#leDate').value || row.date;
+    Object.assign(row, { amount: amt, category: $('#leCat').value.trim() || row.category, date, type: $('#leType').value, who: $('#leWho').value, pay: $('#lePay').value, memo: $('#leMemo').value.trim() });
+    st.editLid = null; st.dirty = true; st.ledgerMonth = String(date).slice(0, 7);
+    status('저장 중…');
+    let saved = false;
+    try { await api('save', { tab: 'Ledger', row }); saved = true; } catch (e) {
+      const q = loadPending().filter(it => String(it.row.id) !== id); q.push({ tab: 'Ledger', row: Object.assign({}, row) }); savePending(q);
+    }
+    status(saved ? '저장됨' : '저장 대기');
+    renderLedger();
+    toast(saved ? '수정했습니다.' : '수정 내용을 이 기기에 보관했습니다. 연결되면 자동으로 저장합니다.', saved ? '' : 'err');
+  }
+
+  /* ---------- 카드사 앱 내역 붙여넣기 ---------- */
+  /** 분류 추정 규칙 (가맹점 이름 기준). 맞지 않으면 표에서 바꾸면 된다 */
+  const CAT_RULES = [
+    [/소아|키즈|유아|장난감|토이|키자니아|아동/i, '__kid__'],
+    [/택시|카카오T|버스|지하철|코레일|SRT|티머니|교통/i, '대중교통'],
+    [/주유|GS칼텍스|SK에너지|S-OIL|에쓰오일|현대오일|충전|주차|하이패스|세차|정비|타이어/i, '차량유지비'],
+    [/스타벅스|커피|카페|투썸|이디야|메가|빽다방|배달의민족|배민|요기요|쿠팡이츠|맥도날드|버거|치킨|피자|식당|김밥|국밥|분식|베이커리|파리바게뜨|뚜레쥬르/i, '외식'],
+    [/마트|이마트|홈플러스|롯데마트|코스트코|트레이더스|컬리|오아시스|GS25|CU|세븐일레븐|이마트24|편의점|농협|하나로|정육|청과/i, '식비'],
+    [/다이소|올리브영|생활/i, '생활용품'],
+    [/병원|의원|약국|치과|한의원|안과|내과/i, '의료'],
+    [/미용|헤어|네일|피부|뷰티/i, '미용'],
+    [/항공|호텔|숙박|야놀자|여기어때|에어비앤비|아고다|리조트|펜션|트립/i, '여행'],
+    [/CGV|메가박스|롯데시네마|넷플릭스|유튜브|멜론|티빙|웨이브|디즈니|스포티파이/i, '여가·문화'],
+    [/통신|SKT|KT|LGU|U\+/i, '통신비'],
+    [/보험|생명|화재|손해/i, '보험'],
+    [/관리비/i, '관리비'], [/한전|전기|가스|수도/i, '공과금'],
+    [/쿠팡|11번가|G마켓|옥션|무신사|지그재그|SSG|네이버페이|유니클로|자라/i, '쇼핑/의류'],
+  ];
+  function guessCat(name) {
+    for (const [re, c] of CAT_RULES) if (re.test(name)) return c === '__kid__' ? names().child + ' 물건' : c;
+    return '기타';
+  }
+  /** 카드사 앱/문자에서 복사한 글을 날짜·가맹점·금액으로 나눈다. 승인 취소·누적 금액 줄은 건너뛴다 */
+  function parseCardText(text) {
+    const lines = String(text || '').split(/\r?\n/).map(l => l.replace(/\s+/g, ' ').trim()).filter(Boolean);
+    const now = new Date(), Y = now.getFullYear();
+    const out = [];
+    let curDate = null, pending = [];
+    const dateIn = l => {
+      let m = /(20\d{2})[.\-\/년]\s*(\d{1,2})[.\-\/월]\s*(\d{1,2})/.exec(l);
+      if (m) return [+m[1], +m[2], +m[3], m[0]];
+      m = /(?:^|\s|\[)(\d{1,2})[.\-\/](\d{1,2})(?=[\s\]]|$|\()/.exec(l) || /(\d{1,2})월\s*(\d{1,2})일/.exec(l);
+      if (m && +m[1] >= 1 && +m[1] <= 12 && +m[2] >= 1 && +m[2] <= 31) { const mo = +m[1]; return [mo > now.getMonth() + 1 ? Y - 1 : Y, mo, +m[2], m[0]]; }
+      return null;
+    };
+    const fmtD = d => d[0] + '-' + String(d[1]).padStart(2, '0') + '-' + String(d[2]).padStart(2, '0');
+    lines.forEach(l => {
+      if (/누적|잔액|한도|합계|총\s*금액|결제\s*예정|포인트/.test(l)) return;
+      const d = dateIn(l);
+      if (d) curDate = fmtD(d);
+      const amts = []; const re = /(-?\d{1,3}(?:,\d{3})+|-?\d{3,})\s*원/g; let m;
+      while ((m = re.exec(l))) amts.push(m[1]);
+      if (!amts.length) {
+        const bare = /(?:^|\s)(-?\d{1,3}(?:,\d{3})+)(?:\s|$)/.exec(l);
+        if (bare) amts.push(bare[1]);
+      }
+      if (!amts.length) {
+        let rest = l; if (d) rest = rest.replace(d[3], '');
+        rest = rest.replace(/\d{1,2}:\d{2}(:\d{2})?/g, '').replace(/일시불|할부|\d+개월|승인|체크|신용|국내|해외|\[|\]|\(|\)|[*]/g, ' ').replace(/\s+/g, ' ').trim();
+        if (rest && !/^\d+$/.test(rest)) pending.push(rest);
+        return;
+      }
+      const amount = Math.abs(num(amts[0].replace(/,/g, ''), 0));
+      if (!amount) return;
+      let name = l; if (d) name = name.replace(d[3], '');
+      name = name.replace(/(-?\d{1,3}(?:,\d{3})+|-?\d{3,})\s*원?/g, ' ').replace(/\d{1,2}:\d{2}(:\d{2})?/g, '').replace(/일시불|할부|\d+개월|승인|체크|신용|국내|해외|취소|환불|\[|\]|\(|\)|[*]|원/g, ' ').replace(/\s+/g, ' ').trim();
+      if (!name && pending.length) name = pending[pending.length - 1];
+      pending = [];
+      const cancel = /취소|환불/.test(l) || /^-/.test(amts[0]);
+      out.push({ date: curDate || todayStr(), name: name || '카드 사용', amount, cancel, on: !cancel });
+    });
+    const led = st.data.Ledger || [];
+    out.forEach(r => {
+      r.cat = guessCat(r.name);
+      r.dup = led.some(x => String(x.date).slice(0, 10) === r.date && num(x.amount, 0) === r.amount);
+      if (r.dup) r.on = false;
+    });
+    return out;
+  }
+  function pasteHtml() {
+    if (st.ltype === 'income') return '';
+    const rows = st.paste || [];
+    const catOpts = c => allExpCats().map(x => '<option' + (x === c ? ' selected' : '') + '>' + esc(x) + '</option>').join('');
+    return '<details class="card paste-card"' + (st.pasteOpen ? ' open' : '') + '><summary><h2>카드 내역 붙여넣기</h2><span class="small muted">카드사 앱에서 복사한 사용 내역을 한 번에 가계부로</span></summary>' +
+      '<label class="f" for="pasteTxt">카드사 앱 또는 문자에서 복사한 내용</label><textarea id="pasteTxt" rows="6" placeholder="예)\n10.05 스타벅스 강남점 6,500원\n10.05 이마트 성수점 54,300원\n10.04 카카오T 12,800원"></textarea>' +
+      '<div class="toolbar"><button class="primary" id="pasteParse">내역 읽기</button>' + (rows.length ? '<button class="ghost" id="pasteClear">비우기</button>' : '') + '</div>' +
+      (rows.length ? '<div class="tbl-wrap"><table class="paste"><thead><tr><th>추가</th><th>날짜</th><th>가맹점</th><th class="r">금액</th><th>분류</th></tr></thead><tbody>' +
+        rows.map((r, i) => '<tr' + (r.on ? '' : ' class="off"') + '><td><input type="checkbox" data-pon="' + i + '"' + (r.on ? ' checked' : '') + ' aria-label="추가"></td><td>' + esc(r.date.slice(5)) + '</td><td>' + esc(r.name) + (r.cancel ? ' <span class="badge">취소</span>' : '') + (r.dup ? ' <span class="badge plain">이미 있음?</span>' : '') + '</td><td class="r">' + won(r.amount) + '</td><td><select data-pcat="' + i + '">' + catOpts(r.cat) + '</select></td></tr>').join('') +
+        '</tbody></table></div><p class="legend-note">취소 건과 같은 날·같은 금액이 이미 있는 건은 체크를 꺼 두었습니다. 입력자는 위에서 고른 사람(' + esc(($('#lgWho') || {}).value === 'wife' ? names().wife : names().me) + ')으로, 결제는 카드로 적힙니다.</p>' +
+        '<div class="toolbar"><button class="primary" id="pasteAdd">선택한 ' + rows.filter(r => r.on).length + '건 가계부에 추가</button></div>' : '<p class="legend-note">줄마다 날짜·가맹점·금액이 있으면 읽을 수 있습니다. 복사한 그대로 붙여 넣으면 됩니다. 저장 전에 표에서 분류를 확인하세요.</p>') +
+      '</details>';
+  }
+  async function addPasted() {
+    const rows = (st.paste || []).filter(r => r.on);
+    if (!rows.length) { toast('추가할 내역을 선택하세요.', 'err'); return; }
+    const who = (() => { try { return localStorage.getItem('am_who') || 'me'; } catch (e) { return 'me'; } })();
+    const btn = $('#pasteAdd'); if (btn) btn.disabled = true;
+    let ok = 0, held = 0;
+    status('저장 중…');
+    for (const r of rows) {
+      const row = { id: newId('led'), date: r.date, type: 'expense', amount: r.amount, category: r.cat, who, pay: '카드', memo: r.name };
+      (st.data.Ledger = st.data.Ledger || []).push(row);
+      try { await api('save', { tab: 'Ledger', row }); ok++; } catch (e) { const q = loadPending(); q.push({ tab: 'Ledger', row }); savePending(q); held++; }
+    }
+    st.dirty = true; st.paste = null; st.pasteOpen = false; st.ledgerMonth = rows[0].date.slice(0, 7);
+    status(held ? '저장 대기' : '저장됨');
+    renderLedger();
+    toast(ok + '건을 추가했습니다.' + (held ? ' ' + held + '건은 이 기기에 보관 중입니다.' : ''), held ? 'err' : '');
+  }
+
+  /* ---------- 자동 기록 (매달 정해진 날 가계부에 적기) ---------- */
+  let recRunning = false;
+  async function runRecurring() {
+    if (recRunning || !st.data || st.local) return;
+    const rules = (st.data.Recurring || []).filter(r => E.isActive(r.active) && num(r.amount, 0) > 0);
+    if (!rules.length) return;
+    recRunning = true;
+    const now = new Date(), curYm = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0');
+    const led = (st.data.Ledger = st.data.Ledger || []);
+    const addYm = (ym, n) => { const [y, m] = ym.split('-').map(Number); const d = new Date(y, m - 1 + n, 1); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0'); };
+    let added = 0;
+    try {
+      for (const rule of rules) {
+        const day = Math.max(1, Math.min(31, Math.round(num(rule.day, 1))));
+        const start = /^\d{4}-\d{2}/.test(String(rule.start)) ? String(rule.start).slice(0, 7) : curYm;
+        let ym = /^\d{4}-\d{2}/.test(String(rule.last_ym)) ? addYm(String(rule.last_ym).slice(0, 7), 1) : start;
+        if (ym < start) ym = start;
+        if (ym < addYm(curYm, -11)) ym = addYm(curYm, -11);   // 최대 12개월만 채운다
+        const end = /^\d{4}-\d{2}/.test(String(rule.end)) ? String(rule.end).slice(0, 7) : '9999-12';
+        let last = null;
+        for (; ym <= curYm && ym <= end; ym = addYm(ym, 1)) {
+          const [y, m] = ym.split('-').map(Number);
+          const d = Math.min(day, new Date(y, m, 0).getDate());
+          if (ym === curYm && now.getDate() < d) break;
+          const id = 'rec_' + rule.id + '_' + ym;
+          if (!led.some(x => String(x.id) === id)) {
+            const row = { id, date: ym + '-' + String(d).padStart(2, '0'), type: rule.type === 'income' ? 'income' : 'expense', amount: num(rule.amount, 0), category: rule.category || (rule.type === 'income' ? '기타수입' : '기타'), who: rule.who === 'wife' ? 'wife' : 'me', pay: rule.pay || '카드', memo: (rule.name || '') + ' (자동)' };
+            await apiOnce('save', { tab: 'Ledger', row });
+            led.push(row); added++;
+          }
+          last = ym;
+        }
+        if (last && last !== String(rule.last_ym).slice(0, 7)) { rule.last_ym = last; await apiOnce('save', { tab: 'Recurring', row: rule }); }
+      }
+    } catch (e) { /* 다음 접속 때 이어서 (id가 같아 중복되지 않음) */ }
+    recRunning = false;
+    if (added) { st.dirty = true; toast('자동 기록 ' + added + '건을 가계부에 적었습니다.'); render(); }
   }
 
   /* ---------- 분석 ---------- */
@@ -671,11 +865,11 @@
       '</div><div class="toolbar"><button class="primary" id="simRun">다시 계산</button><button id="simSave">이 가정을 저장</button><button class="ghost" id="simReset">처음 값으로</button></div>' +
       '<p class="small muted">집값은 평균이 정확히 ' + S.house_mean + '%가 되도록 만든 가상의 오르내림입니다. 경로 번호를 바꾸면 다른 흐름이 나옵니다. 예측이 아니라 가정에 따른 계산입니다.</p></section>' +
       '<section class="card"><h2>순자산 30년</h2><div class="chart-box tall"><canvas id="simChart" role="img" aria-label="순자산 시뮬레이션"></canvas></div></section>' +
-      '<section class="card"><h2>은퇴 시기별 비교</h2><div class="tbl-wrap"><table><thead><tr><th>은퇴 나이</th><th class="r">금융자산 바닥나는 나이</th><th class="r">10년 후 순자산</th><th class="r">20년 후 순자산</th><th class="r">65세 순자산</th><th class="r">65세 금융자산</th></tr></thead><tbody>' +
-      sc.map(s => '<tr><td>' + esc(s.label) + '</td><td class="r ' + (s.depleteAge ? 'neg' : 'pos') + '">' + (s.depleteAge ? s.depleteAge + '세' : '바닥나지 않음') + '</td><td class="r">' + fm(s.nw10) + '</td><td class="r">' + fm(s.nw20) + '</td><td class="r">' + fm(s.nw65) + '</td><td class="r">' + fm(s.fin65) + '</td></tr>').join('') + '</tbody></table></div>' +
+      '<section class="card"><h2>은퇴 시기별 비교</h2><div class="tbl-wrap"><table><thead><tr><th>은퇴 나이</th><th class="r">금융자산 바닥나는 나이</th><th class="r">10년 후 순자산</th><th class="r">20년 후 순자산</th><th class="r">65세' + kidTag(65) + ' 순자산</th><th class="r">65세 금융자산</th></tr></thead><tbody>' +
+      sc.map(s => '<tr><td>' + esc(s.label) + '</td><td class="r ' + (s.depleteAge ? 'neg' : 'pos') + '">' + (s.depleteAge ? s.depleteAge + '세' + kidTag(s.depleteAge) : '바닥나지 않음') + '</td><td class="r">' + fm(s.nw10) + '</td><td class="r">' + fm(s.nw20) + '</td><td class="r">' + fm(s.nw65) + '</td><td class="r">' + fm(s.fin65) + '</td></tr>').join('') + '</tbody></table></div>' +
       '<p class="legend-note">금융자산 = 현금 + 비상금 + 투자(IRP 포함), 부채 차감. 집 매각·주택연금은 넣지 않았고 국민연금은 임시 추정값입니다. 본인 88세까지 봅니다.</p></section>' +
-      '<section class="card"><h2>연도별 표</h2><div class="tbl-wrap mini"><table><thead><tr><th>연도</th><th class="r">본인 나이</th><th class="r">수입</th><th class="r">지출(대출 포함)</th><th class="r">순자산</th><th class="r">금융자산</th><th class="r">집</th><th class="r">부채</th></tr></thead><tbody>' +
-      yrs.map(r => '<tr><td>' + r.y + '</td><td class="r">' + r.age + '</td><td class="r">' + fm(r.inc) + '</td><td class="r">' + fm(r.exp) + '</td><td class="r"><b>' + fm(r.nw) + '</b></td><td class="r' + (r.short ? ' neg' : '') + '">' + fm(r.fin) + '</td><td class="r">' + fm(r.house) + '</td><td class="r">' + fm(r.debt) + '</td></tr>').join('') + '</tbody></table></div></section>';
+      '<section class="card"><h2>연도별 표</h2><div class="tbl-wrap mini"><table><thead><tr><th>연도</th><th class="r">본인 나이</th><th class="r">' + names().child + ' 나이</th><th class="r">수입</th><th class="r">지출(대출 포함)</th><th class="r">순자산</th><th class="r">금융자산</th><th class="r">집</th><th class="r">부채</th></tr></thead><tbody>' +
+      yrs.map(r => '<tr><td>' + r.y + '</td><td class="r">' + r.age + '</td><td class="r">' + kidAge(r.age) + '</td><td class="r">' + fm(r.inc) + '</td><td class="r">' + fm(r.exp) + '</td><td class="r"><b>' + fm(r.nw) + '</b></td><td class="r' + (r.short ? ' neg' : '') + '">' + fm(r.fin) + '</td><td class="r">' + fm(r.house) + '</td><td class="r">' + fm(r.debt) + '</td></tr>').join('') + '</tbody></table></div></section>';
     nwCharts('simChart', sim);
   }
 
@@ -736,12 +930,12 @@
     if (E.idxOf(ym) < sa.earliestIdx) { ym = sa.earliestYm; ymNote = '입력한 월이 실거주 2년 이전이라 가장 빠른 시점으로 바꿨습니다.'; }
     const cmp = A.afterSaleCompare(st.data, over, ym);
     const later = sa.hit ? sa.monthly.find(m => m.idx === sa.hit.idx + 24) : null;
-    const yRows = sa.yearly.slice(0, 27).map(r => '<tr' + (r.price >= S.house_target ? ' class="hl"' : '') + '><td>' + r.ym + '</td><td class="r">' + r.age + '세</td><td class="r">' + fm(r.price) + '</td><td class="r">' + Math.round(r.price / S.house_target * 100) + '%</td><td class="r">' + fm(-r.tax) + '</td><td class="r">' + fm(-r.fee) + '</td><td class="r">' + fm(-r.repay) + '</td><td class="r"><b>' + fm(r.net) + '</b></td><td class="r">' + (r.annual * 100).toFixed(1) + '%</td></tr>').join('');
+    const yRows = sa.yearly.slice(0, 27).map(r => '<tr' + (r.price >= S.house_target ? ' class="hl"' : '') + '><td>' + r.ym + '</td><td class="r">' + r.age + '세</td><td class="r">' + kidAge(r.age) + '세</td><td class="r">' + fm(r.price) + '</td><td class="r">' + Math.round(r.price / S.house_target * 100) + '%</td><td class="r">' + fm(-r.tax) + '</td><td class="r">' + fm(-r.fee) + '</td><td class="r">' + fm(-r.repay) + '</td><td class="r"><b>' + fm(r.net) + '</b></td><td class="r">' + (r.annual * 100).toFixed(1) + '%</td></tr>').join('');
     const col = fn => cmp.map(c => '<td class="r">' + fn(c) + '</td>').join('');
     const hasSale = c => !!c.sale;
     subEl().innerHTML =
       '<section class="card"><h2>목표 매도가 ' + fm(S.house_target) + '</h2>' +
-      (sa.hit ? '<div class="big-num">' + sa.hit.ym + ' <span class="small muted">본인 ' + sa.hit.age + '세 · 집값 ' + fm(sa.hit.price) + '</span></div>' +
+      (sa.hit ? '<div class="big-num">' + sa.hit.ym + ' <span class="small muted">본인 ' + sa.hit.age + '세 · ' + names().child + ' ' + kidAge(sa.hit.age) + '세 · 집값 ' + fm(sa.hit.price) + '</span></div>' +
         '<p class="small">양도세 ' + fm(sa.hit.tax) + ' · 중개보수 ' + fm(sa.hit.fee) + ' · 대출 상환 ' + fm(sa.hit.repay) + ' → <b>손에 쥐는 돈 ' + fm(sa.hit.net) + '</b></p>' :
         '<div class="note warn"><div class="body">지금 가정(연평균 ' + S.house_mean + '%)으로는 목표가에 닿지 않습니다. 목표가를 낮추거나 [은퇴·미래]에서 상승률을 바꿔 보세요.</div></div>') +
       '<ul class="plain">' +
@@ -764,13 +958,13 @@
       '<tr><td>월 수입 (전 → 후)</td>' + col(c => fm(c.incBefore) + ' → ' + fm(c.incAfter)) + '</tr>' +
       '<tr><td>월 지출 (전 → 후)</td>' + col(c => fm(c.expBefore) + ' → ' + fm(c.expAfter)) + '</tr>' +
       '<tr class="strongrow"><td><b>월 남는 돈 (전 → 후)</b></td>' + col(c => '<b>' + fm(c.surBefore) + ' → ' + fm(c.surAfter) + '</b>') + '</tr>' +
-      '<tr><td>65세 순자산</td>' + col(c => fm(c.nw65)) + '</tr>' +
+      '<tr><td>65세' + kidTag(65) + ' 순자산</td>' + col(c => fm(c.nw65)) + '</tr>' +
       '<tr><td>65세 금융자산</td>' + col(c => fm(c.fin65)) + '</tr>' +
-      '<tr><td>금융자산 바닥나는 나이</td>' + col(c => (c.depleteAge ? '<span class="neg">' + c.depleteAge + '세</span>' : '<span class="pos">없음</span>')) + '</tr>' +
+      '<tr><td>금융자산 바닥나는 나이</td>' + col(c => (c.depleteAge ? '<span class="neg">' + c.depleteAge + '세' + kidTag(c.depleteAge) + '</span>' : '<span class="pos">없음</span>')) + '</tr>' +
       '</tbody></table></div>' +
       '<div class="toolbar"><button data-apply="sell:jeonse:' + ym + '">전세 이주로 확정</button><button data-apply="sell:rent:' + ym + '">월세 이주로 확정</button><button class="ghost" data-apply="sell:clear">매도 계획 지우기</button></div>' +
       '<p class="legend-note">판 뒤에는 대출 상환과 재산세가 없어지고, 전세는 보증금이 묶이며 월세는 매달 나갑니다. 남는 돈은 연 ' + S.invest_return + '% 투자를 가정했습니다. 수입 변화에는 은퇴 시점의 영향도 섞여 있습니다.</p></section>' +
-      '<section class="card"><h2>팔 시점별 손에 쥐는 돈 (매년 4월)</h2><div class="tbl-wrap mini"><table><thead><tr><th>시점</th><th class="r">나이</th><th class="r">집값</th><th class="r">목표 대비</th><th class="r">양도세</th><th class="r">중개보수</th><th class="r">대출 상환</th><th class="r">손에 쥐는 돈</th><th class="r">연 환산 수익률</th></tr></thead><tbody>' + yRows + '</tbody></table></div>' +
+      '<section class="card"><h2>팔 시점별 손에 쥐는 돈 (매년 4월)</h2><div class="tbl-wrap mini"><table><thead><tr><th>시점</th><th class="r">본인</th><th class="r">' + names().child + '</th><th class="r">집값</th><th class="r">목표 대비</th><th class="r">양도세</th><th class="r">중개보수</th><th class="r">대출 상환</th><th class="r">손에 쥐는 돈</th><th class="r">연 환산 수익률</th></tr></thead><tbody>' + yRows + '</tbody></table></div>' +
       '<p class="legend-note">강조된 줄은 목표가 이상인 해입니다. 수익률은 세금·중개보수를 뺀 매도가를 총 취득비용과 비교해 1년 단위로 환산했습니다(대출 이자·보유비 제외).</p></section>';
   }
 
@@ -907,6 +1101,8 @@
   main.addEventListener('change', e => {
     const t = e.target;
     if (t.id === 'lgMonth') { st.ledgerMonth = t.value; renderLedger(); return; }
+    if (t.dataset && t.dataset.pon != null) { st.paste[+t.dataset.pon].on = t.checked; renderLedger(); return; }
+    if (t.dataset && t.dataset.pcat != null) { st.paste[+t.dataset.pcat].cat = t.value; return; }
     if (t.tagName === 'SELECT') onFieldEdit(t);
   });
 
@@ -938,13 +1134,24 @@
       return;
     }
     if (t.closest('#saveNames')) {
-      const a = $('#nmMe').value.trim(), b2 = $('#nmWife').value.trim();
-      if (!a || !b2) { toast('두 이름을 모두 입력하세요.', 'err'); return; }
-      try { await saveSettingValue('name_me', a); await saveSettingValue('name_wife', b2); toast('이름을 저장했습니다.'); render(); } catch (err) { toast(err.message, 'err'); }
+      const a = $('#nmMe').value.trim(), b2 = $('#nmWife').value.trim(), c3 = $('#nmKid').value.trim();
+      if (!a || !b2 || !c3) { toast('이름을 모두 입력하세요.', 'err'); return; }
+      try { await saveSettingValue('name_me', a); await saveSettingValue('name_wife', b2); await saveSettingValue('name_child', c3); toast('이름을 저장했습니다.'); render(); } catch (err) { toast(err.message, 'err'); }
       return;
     }
     if (t.closest('#lgAdd')) { addLedger(); return; }
     if (t.closest('#retryPending')) { flushPending().then(() => { if (st.tab === 'ledger') renderLedger(); }); return; }
+    if (t.closest('[data-ledit]')) { st.editLid = t.closest('[data-lid]').dataset.lid; renderLedger(); const a = $('#leAmt'); if (a) a.focus(); return; }
+    if (t.closest('[data-lcancel]')) { st.editLid = null; renderLedger(); return; }
+    if (t.closest('[data-lsave]')) { saveLedgerEdit(t.closest('[data-lid]').dataset.lid); return; }
+    if (t.closest('#pasteParse')) {
+      const rows = parseCardText($('#pasteTxt').value);
+      st.pasteOpen = true; st.paste = rows; renderLedger();
+      toast(rows.length ? rows.length + '건을 읽었습니다. 분류를 확인하고 추가하세요.' : '읽을 수 있는 내역이 없습니다. 줄마다 날짜·가맹점·금액이 있는지 확인하세요.', rows.length ? '' : 'err');
+      return;
+    }
+    if (t.closest('#pasteClear')) { st.paste = null; renderLedger(); return; }
+    if (t.closest('#pasteAdd')) { addPasted(); return; }
     if (t.closest('[data-ldel]')) {
       const id = t.closest('[data-lid]').dataset.lid;
       if (!confirm('이 내역을 삭제할까요?')) return;
@@ -1022,7 +1229,7 @@
       history.replaceState(null, '', location.pathname + location.search);
     }
   } catch (e) { /* ignore */ }
-  window.__AM = { st, go, start: data => { st.local = true; st.data = data; st.dirty = true; $('#login').classList.add('hidden'); $('#app').classList.remove('hidden'); renderTabs(); render(); } };
+  window.__AM = { st, go, runRecurring, start: data => { st.local = true; st.data = data; st.dirty = true; $('#login').classList.add('hidden'); $('#app').classList.remove('hidden'); renderTabs(); render(); } };
   if (window.__TEST_DATA) { window.__AM.start(window.__TEST_DATA); return; }
   if (getToken() && localStorage.getItem('am_api')) loadAll().catch(() => showLogin(''));
   else showLogin('');
