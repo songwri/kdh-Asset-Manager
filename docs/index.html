@@ -14,8 +14,11 @@
   <div class="card">
     <h1>우리집 자산관리</h1>
     <p class="muted small">데이터는 구글 시트에만 저장되며, 보안코드를 입력해야 불러옵니다.</p>
-    <label class="f" for="apiUrl">Apps Script 웹 앱 URL <span class="muted">(처음 한 번만)</span></label>
-    <input id="apiUrl" type="url" placeholder="https://script.google.com/macros/s/.../exec" autocomplete="off">
+    <div id="apiBox">
+      <label class="f" for="apiUrl">Apps Script 웹 앱 URL <span class="muted">(처음 한 번만)</span></label>
+      <input id="apiUrl" type="url" placeholder="https://script.google.com/macros/s/.../exec" autocomplete="off">
+    </div>
+    <p id="apiSaved" class="muted small hidden" style="margin:12px 0 0">연결됨 · <a href="#" id="apiChange">주소 바꾸기</a></p>
     <label class="f" for="pin">보안코드</label>
     <input id="pin" type="password" autocomplete="current-password">
     <div style="margin-top:16px"><button id="loginBtn" class="primary" style="width:100%">접속</button></div>

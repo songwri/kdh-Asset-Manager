@@ -63,7 +63,10 @@
   /* ---------- 로그인 ---------- */
   function showLogin(msg) {
     $('#app').classList.add('hidden'); $('#login').classList.remove('hidden');
-    $('#apiUrl').value = localStorage.getItem('am_api') || '';
+    const saved = localStorage.getItem('am_api') || '';
+    $('#apiUrl').value = saved;
+    $('#apiBox').classList.toggle('hidden', !!saved);
+    $('#apiSaved').classList.toggle('hidden', !saved);
     $('#loginErr').textContent = msg || '';
     $('#pin').value = ''; (localStorage.getItem('am_api') ? $('#pin') : $('#apiUrl')).focus();
   }
@@ -356,12 +359,20 @@
         Events: '지출은 마이너스. house_pay는 집값 선납으로, lease_return은 전세금 반환으로 처리됩니다.',
       })[st.sub] + '</div>' + editTable(st.sub, st.data[st.sub] || []) + '</div>';
   }
+  function inviteLink() {
+    const u = localStorage.getItem('am_api') || '';
+    return u ? location.origin + location.pathname + '#u=' + encodeURIComponent(u) : '';
+  }
   function renderSettings() {
     const S = E.settings(st.data);
     const keys = Object.keys(E.DEFAULTS);
     main.innerHTML = '<div class="card"><h2>가정값 설정</h2><div class="tbl-wrap"><table class="set-table"><thead><tr><th>항목</th><th>값</th><th>단위</th></tr></thead><tbody>' +
       keys.map(k => '<tr data-k="' + k + '"><td>' + esc((SETTING_LABELS[k] || [k])[0]) + ' <span class="muted small">' + k + '</span></td><td><input value="' + esc(S[k]) + '"></td><td class="muted">' + esc((SETTING_LABELS[k] || ['', ''])[1]) + '</td></tr>').join('') +
-      '</tbody></table></div></div><div class="card"><h2>보안</h2><p class="small muted">보안코드는 구글 시트 메뉴 [자산관리 > 보안코드 설정]에서 바꿉니다. 5회 틀리면 15분간 접속이 잠깁니다.</p></div>';
+      '</tbody></table></div></div>' +
+      '<div class="card"><h2>가족 폰에 연결하기</h2><p class="small muted">아래 링크를 와이프에게 보내 한 번 열게 하면, 그 폰에는 연결 주소가 저장되고 이후에는 보안코드만 입력하면 됩니다. 링크에는 연결 주소가 들어 있으니 카카오톡 같은 개인 채팅으로만 보내세요.</p>' +
+      '<input id="inviteLink" readonly value="' + esc(inviteLink()) + '"><div class="toolbar"><button class="primary" id="copyInvite">링크 복사</button><span class="small muted" id="copyMsg"></span></div>' +
+      '<p class="small muted">보안코드는 링크에 들어 있지 않습니다. 따로 알려주세요.</p></div>' +
+      '<div class="card"><h2>보안</h2><p class="small muted">보안코드는 구글 시트 메뉴 [자산관리 > 보안코드 설정]에서 바꿉니다. 5회 틀리면 15분간 접속이 잠깁니다.</p></div>';
   }
   function renderGuide() {
     main.innerHTML = '<div class="card"><h2>시장·경제 데이터 연결 가이드 (다음 단계)</h2>' +
@@ -401,6 +412,7 @@
   /* ---------- 이벤트 ---------- */
   ['#tabs', '#bottomnav'].forEach(sel => $(sel).addEventListener('click', e => { const b = e.target.closest('[data-tab]'); if (!b) return; st.tab = b.dataset.tab; renderTabs(); render(); }));
   $('#loginBtn').addEventListener('click', doLogin);
+  $('#apiChange').addEventListener('click', e => { e.preventDefault(); $('#apiBox').classList.remove('hidden'); $('#apiSaved').classList.add('hidden'); $('#apiUrl').focus(); });
   $('#pin').addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
   $('#logoutBtn').addEventListener('click', () => logout(false));
   $('#reloadBtn').addEventListener('click', () => loadAll().catch(e => alert(e.message)));
@@ -459,6 +471,13 @@
       try { await saveSettingValue('variable_override', Math.round(bc.avgVar), '가계부 최근 평균 변동지출'); status('저장됨 ✓'); alert('시뮬레이션의 변동 생활비를 ' + Math.round(bc.avgVar) + '만원/월로 바꿨습니다.'); } catch (err) { alert(err.message); }
       return;
     }
+    if (t.closest('#copyInvite')) {
+      const inp = $('#inviteLink'); inp.select();
+      let ok = false;
+      try { await navigator.clipboard.writeText(inp.value); ok = true; } catch (err) { try { ok = document.execCommand('copy'); } catch (e2) { /* ignore */ } }
+      $('#copyMsg').textContent = ok ? '복사했습니다' : '직접 길게 눌러 복사하세요';
+      return;
+    }
     if (t.closest('#simRun')) {
       st.over = {};
       main.querySelectorAll('[data-sim]').forEach(i => { const v = i.value.trim(); if (v !== '' && !isNaN(Number(v))) st.over[i.dataset.sim] = Number(v); });
@@ -478,6 +497,14 @@
   window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { if (st.data) render(); });
 
   /* ---------- 시작 ---------- */
+  try {
+    const m = /[#&]u=([^&]+)/.exec(location.hash);
+    if (m) {
+      const u = decodeURIComponent(m[1]);
+      if (/^https:\/\/script\.google\.com\//.test(u)) localStorage.setItem('am_api', u);
+      history.replaceState(null, '', location.pathname + location.search);
+    }
+  } catch (e) { /* ignore */ }
   window.__AM = { st, start: data => { st.local = true; st.data = data; st.dirty = true; $('#login').classList.add('hidden'); $('#app').classList.remove('hidden'); renderTabs(); render(); } };
   if (window.__TEST_DATA) { window.__AM.start(window.__TEST_DATA); return; }
   if (sessionStorage.getItem('am_tok') && localStorage.getItem('am_api')) loadAll().catch(() => showLogin(''));
