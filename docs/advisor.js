@@ -26,7 +26,7 @@
       r.flags = [];
       if (r.pnl <= -0.6) r.flags.push('손실 -60% 이하');
       else if (r.pnl <= -0.4) r.flags.push('손실 -40% 이하');
-      if (r.weight >= 0.3) r.flags.push('비중 30% 이상');
+      if (r.weight >= 0.3 && !/계좌/.test(String(r.sector || ''))) r.flags.push('비중 30% 이상'); // 계좌 합계로 넣은 줄은 여러 종목이라 제외
       if (r.pnl <= -0.4 && !String(r.thesis || '').trim()) r.flags.push('보유 사유 미기재');
       if (/커버드콜/.test(r.name)) r.flags.push('커버드콜: 상승 제한');
     });
@@ -90,7 +90,8 @@
     const t = curIdx(sim, now), nt = t + 1;
     const mk = k => {
       const inc = sim.income[k], fx = sim.expFixed[k], dp = sim.debtPay[k];
-      const save = inc * S.save_rate_target / 100;
+      // 목표 저축: 저축률 목표와 실제 적금 납입액 중 큰 값 (적금이 목표를 이미 채우면 따로 더 빼지 않는다)
+      const save = Math.max(inc * S.save_rate_target / 100, (sim.save || [])[k] || 0);
       return { ym: sim.ym[k], income: inc, fixed: fx, debt: dp, save, cap: Math.max(0, inc - fx - dp - save) };
     };
     const cur = mk(t), next = mk(nt);
@@ -219,7 +220,7 @@
     const lo = sim.ym.indexOf('2027-02'), hi = sim.ym.indexOf('2027-07');
     if (lo >= 0 && hi >= lo) {
       let s = 0;
-      for (let t = lo; t <= hi; t++) s += sim.income[t] - sim.expFixed[t] - sim.expVar[t] - sim.debtPay[t];
+      for (let t = lo; t <= hi; t++) s += sim.income[t] - sim.expFixed[t] - sim.expVar[t] - sim.debtPay[t] - (sim.save[t] || 0);
       add(s / (hi - lo + 1) < 100 ? 'warn' : 'info', '휴직', '와이프 휴직 기간(27.2~7) 월 평균 잉여 ' + fm(s / (hi - lo + 1)),
         '입주·대출 상환이 겹치는 시기입니다. 이 기간에는 투자 납입을 멈추고 현금 흐름을 우선하세요.');
     }
@@ -266,10 +267,11 @@
     // 10. 월 잉여금 배분
     const tSteady = Math.min(sim.N - 13, Math.max(0, sim.ym.indexOf('2027-09')));
     let sSum = 0;
-    for (let t = tSteady; t < tSteady + 12; t++) sSum += sim.income[t] - sim.expFixed[t] - sim.expVar[t] - sim.debtPay[t];
+    // 남는 돈 = 수입 − 지출 − 대출 − 이미 넣고 있는 적금
+    for (let t = tSteady; t < tSteady + 12; t++) sSum += sim.income[t] - sim.expFixed[t] - sim.expVar[t] - sim.debtPay[t] - (sim.save[t] || 0);
     const steadySurplus = sSum / 12;
     const nowT = curIdx(sim, now);
-    const nowSurplus = sim.income[nowT + 1] - sim.expFixed[nowT + 1] - sim.expVar[nowT + 1] - sim.debtPay[nowT + 1];
+    const nowSurplus = sim.income[nowT + 1] - sim.expFixed[nowT + 1] - sim.expVar[nowT + 1] - sim.debtPay[nowT + 1] - (sim.save[nowT + 1] || 0);
     const allocNow = allocate(nowSurplus, { liquidityRisk, emergencyGap: gap, emergencyMonths: S.emergency_months });
     const allocSteady = allocate(steadySurplus, { liquidityRisk: false, emergencyGap: gap, emergencyMonths: S.emergency_months });
 
@@ -294,6 +296,7 @@
       { label: '월급·수입 합계', val: sum(t => sim.income[t]) },
       { label: '생활비·고정지출 합계', val: -sum(t => sim.expFixed[t] + sim.expVar[t]) },
       { label: '대출·할부 상환', val: -sum(t => sim.debtPay[t]) },
+      { label: '적금 넣음 (비상금·적금으로 이동)', val: -sum(t => sim.save[t] || 0) },
       { label: '대출 실행(주담대 등)', val: sum(t => sim.disb[t]) },
       { label: '전세보증금 반환', val: cat('lease_return') },
       { label: '집 계약금·중도금·잔금', val: cat('house_pay') },

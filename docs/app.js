@@ -63,7 +63,7 @@
       F('months', '받는 달 (매년일 때)', 'text', { ph: '예: 1,2', hint: '매년 받는 수입만 입력' }), F('start', '시작 월', 'month'), F('end', '끝나는 월', 'month', { hint: '비우면 계속' }),
       F('grow', '매년 금액 변화', 'sel', { opt: 'grow' }), F('retire_stop', '은퇴하면 끊김', 'sel', { opt: 'yn' }), F('pause_from', '쉬는 기간 시작', 'month', { hint: '휴직 등' }), F('pause_to', '쉬는 기간 끝', 'month'),
       F('note', '메모', 'text'), F('active', '계산', 'sel', { opt: 'active' })],
-    Expenses: [F('name', '항목 이름', 'text', { ph: '예: 유치원' }), F('category', '분류', 'text', { list: 'expCats', hint: '교육으로 두면 자녀 분석에 쓰입니다' }), F('amount', '금액', 'num', { unit: '만원' }), F('kind', '얼마나 자주', 'sel', { opt: 'kind' }),
+    Expenses: [F('name', '항목 이름', 'text', { ph: '예: 유치원' }), F('category', '분류', 'text', { list: 'expCats', hint: '교육 = 자녀 분석에 사용 · 저축 = 매달 적금에 넣는 돈(비용이 아니라 현금이 적금으로 옮겨감)' }), F('amount', '금액', 'num', { unit: '만원' }), F('kind', '얼마나 자주', 'sel', { opt: 'kind' }),
       F('months', '나가는 달 (매년일 때)', 'text', { ph: '예: 7,9' }), F('start', '시작 월', 'month'), F('end', '끝나는 월', 'month', { hint: '비우면 계속' }),
       F('inflate', '물가만큼 오름', 'sel', { opt: 'yn' }), F('variable', '생활비 기준값', 'sel', { opt: 'yn', hint: '예 = 가계부 실제 지출로 바꿔 계산할 수 있는 생활비' }), F('note', '메모', 'text'), F('active', '계산', 'sel', { opt: 'active' })],
     Assets: [F('name', '이름', 'text', { ph: '예: 신한은행 입출금' }), F('category', '종류', 'sel', { opt: 'assetCat' }), F('owner', '누구 것', 'sel', { opt: 'owner' }), F('value', '금액', 'num', { unit: '만원' }),
@@ -107,7 +107,7 @@
     assets: ['Assets', '자산·현금', '은행 잔고, 비상금, 연금, 전세보증금처럼 "지금 가진 돈"을 적는 곳입니다. 주식·ETF는 [투자 종목]에 따로 적습니다.'],
     holdings: ['Holdings', '투자 종목', '주식·ETF를 종목별로 적습니다. 시세 코드를 넣으면 매일 오후 4시쯤 현재가가 자동으로 바뀝니다.'],
     income: ['Income', '수입', '월급, 인센티브, 아동수당처럼 들어오는 돈입니다. 매달·매년·한 번만 중에서 고르고, 휴직처럼 쉬는 기간도 넣을 수 있습니다.'],
-    expenses: ['Expenses', '고정 지출', '관리비, 유치원, 보험처럼 정해진 지출과 "생활비 기준값"을 적습니다. 매일 쓰는 돈은 [가계부]에 적습니다.'],
+    expenses: ['Expenses', '고정 지출', '관리비, 유치원, 보험처럼 정해진 지출과 "생활비 기준값"을 적습니다. 매달 넣는 적금은 분류를 "저축"으로 두면 비용이 아니라 적금으로 옮기는 돈으로 계산합니다. 매일 쓰는 돈은 [가계부]에 적습니다.'],
     debts: ['Debts', '대출·할부', '주택담보대출, 카드 할부처럼 갚아야 하는 돈입니다. 원리금균등 상환으로 계산합니다.'],
     recurring: ['Recurring', '자동 기록', '구독료, 통신비, 관리비처럼 매달 같은 날 나가는 돈을 한 번만 등록하면, 그 날짜가 지난 뒤 앱을 열 때 가계부에 자동으로 적힙니다. 놓친 달도 최대 12개월까지 채웁니다.'],
     events: ['Events', '큰 일정', '계약금·잔금, 전세금 반환, 세금, 이사처럼 한 번에 크게 들어오거나 나가는 돈입니다. 나가는 돈은 금액 앞에 −를 붙입니다.'],
@@ -406,7 +406,7 @@
       '<div class="efields">' + FIELDS[tab].map(f => fieldHtml(f, r[f.k])).join('') + '</div>' +
       '<div class="erow-actions"><span class="small muted">입력하면 자동 저장됩니다</span><button class="ghost danger" data-del>삭제</button></div></details>').join('') :
       '<div class="empty">아직 입력한 항목이 없습니다. 아래 버튼으로 추가하세요.</div>';
-    return '<datalist id="expCats">' + ['생활', '주거', '교육', '보험', '세금', '자동차', '통신', '고정'].map(c => '<option value="' + c + '">').join('') + '</datalist>' +
+    return '<datalist id="expCats">' + ['생활', '주거', '교육', '보험', '세금', '자동차', '통신', '저축', '고정'].map(c => '<option value="' + c + '">').join('') + '</datalist>' +
       '<datalist id="ledCats">' + allExpCats().concat(CATS_INC).map(c => '<option value="' + esc(c) + '">').join('') + '</datalist>' +
       '<div class="elist" data-etab="' + tab + '">' + body + '</div><div class="toolbar"><button class="primary" data-add="' + tab + '">+ 추가</button></div>';
   }
@@ -456,15 +456,20 @@
   function monthCosts(sim, k) {
     const S = sim.S, idx = sim.start + k;
     const fixed = [];
-    (st.data.Expenses || []).forEach(r => { if (E.isY(r.variable)) return; const a = E.expenseAt(r, idx, S, k, 1); if (a > 0.005) fixed.push([r.name || '지출', a]); });
+    const saves = [];
+    (st.data.Expenses || []).forEach(r => {
+      if (E.isY(r.variable) || skipExp(r, S)) return;
+      const a = E.expenseAt(r, idx, S, k, 1);
+      if (a > 0.005) (E.isSaving(r) ? saves : fixed).push([r.name || '지출', a]);
+    });
     const fixSum = fixed.reduce((q, x) => q + x[1], 0);
     if (sim.expFixed[k] - fixSum > 0.5) fixed.push(['기타 정해진 지출(월세 등)', sim.expFixed[k] - fixSum]);
     fixed.sort((a, b) => b[1] - a[1]);
     const ev = monthEvents(sim, k);
     const evOut = ev.filter(x => x.amt < 0).sort((a, b) => a.amt - b.amt), evIn = ev.filter(x => x.amt > 0);
-    const fixedTotal = sim.expFixed[k], living = sim.expVar[k], debt = sim.debtPay[k];
+    const fixedTotal = sim.expFixed[k], living = sim.expVar[k], debt = sim.debtPay[k], save = sim.save[k] || 0;
     const evOutTotal = -evOut.reduce((q, x) => q + x.amt, 0), evInTotal = evIn.reduce((q, x) => q + x.amt, 0);
-    return { ym: sim.ym[k], fixed, fixedTotal, living, debt, evOut, evIn, evOutTotal, evInTotal, income: sim.income[k], out: fixedTotal + living + debt + evOutTotal, end: sim.cash[k], low: sim.low[k] };
+    return { ym: sim.ym[k], fixed, fixedTotal, saves, save, living, debt, evOut, evIn, evOutTotal, evInTotal, income: sim.income[k], out: fixedTotal + living + debt + save + evOutTotal, end: sim.cash[k], low: sim.low[k] };
   }
   /** 이번 달 아직 안 적힌 자동 기록 (가계부 원 단위) */
   function recurringLeft() {
@@ -506,6 +511,7 @@
       m.evOut.forEach(x => items.push(line('<b>' + esc(x.name) + '</b>', fm(-x.amt), x.certain ? '큰 일정' : '추정')));
       if (m.debt > 0.5) items.push(line('대출·할부 상환', fm(m.debt)));
       if (m.fixed.length) items.push('<li class="sub"><details><summary><span>정해진 지출 ' + m.fixed.length + '건</span><b>' + fm(m.fixedTotal) + '</b></summary><ul>' + m.fixed.map(([n, a]) => line(esc(n), fm(a))).join('') + '</ul></details></li>');
+      if (m.saves.length) items.push('<li class="sub"><details><summary><span>적금 넣음 ' + m.saves.length + '건 <em>자산 이동</em></span><b>' + fm(m.save) + '</b></summary><ul>' + m.saves.map(([n, a]) => line(esc(n), fm(a))).join('') + '</ul></details></li>');
       items.push(line('생활비 (계획)', fm(m.living)));
       const ins = m.evIn.length ? '<p class="small muted">들어오는 큰 돈: ' + m.evIn.map(x => esc(x.name) + ' +' + fm(x.amt)).join(' · ') + '</p>' : '';
       return '<div class="cost-month' + (m.evOut.length ? ' big' : '') + '"><div class="row-between cm-head"><h3>' + (i === 0 ? '이번 달 (' + monthName(m.ym) + ')' : m.ym.slice(0, 4) + '년 ' + monthName(m.ym)) + (m.evOut.length ? ' <span class="badge">큰 지출</span>' : '') + '</h3><b>−' + fm(m.out) + '</b></div>' +
@@ -537,6 +543,8 @@
 
   /* ---------- 현금 일정 ---------- */
   /** 한 달의 들어오는 돈 / 나가는 돈 장부 (엔진 결과와 합계가 맞도록 차이는 '기타'로 맞춤) */
+  /** 테슬라를 안 사는 계획이면 테슬라 관련 고정 지출은 빼고 본다 (엔진과 같은 규칙) */
+  const skipExp = (r, S) => !E.isActive(r.active) || (S.tesla === 'skip' && /테슬라/.test(String(r.name)));
   function monthSheet(sim, k) {
     const S = sim.S, idx = sim.start + k;
     const ins = [], outs = [];
@@ -545,7 +553,12 @@
     const varBase = varRows.reduce((q, r) => q + num(r.amount, 0), 0);
     const varScale = S.variable_override > 0 && varBase > 0 ? S.variable_override / varBase : 1;
     let expSum = 0;
-    (st.data.Expenses || []).forEach(r => { const a = E.expenseAt(r, idx, S, k, varScale); if (a > 0.005) { outs.push([r.name || '지출', a]); expSum += a; } });
+    (st.data.Expenses || []).forEach(r => {
+      if (skipExp(r, S)) return;
+      const a = E.expenseAt(r, idx, S, k, varScale);
+      if (a <= 0.005) return;
+      if (E.isSaving(r)) outs.push(['적금 넣음 · ' + (r.name || '저축'), a, '자산 이동']); else { outs.push([r.name || '지출', a]); expSum += a; }
+    });
     const expEngine = sim.expFixed[k] + sim.expVar[k];
     if (Math.abs(expEngine - expSum) > 0.5) outs.push(['기타 지출(월세 등)', expEngine - expSum]);
     if (sim.debtPay[k] > 0.005) outs.push(['대출·할부 상환', sim.debtPay[k]]);

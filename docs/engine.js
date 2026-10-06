@@ -72,6 +72,9 @@
     return a;
   }
 
+  /** 고정 지출 중 분류가 '저축'인 항목 = 매달 적금에 넣는 돈 */
+  const isSaving = r => String(r.category || '').trim() === '저축';
+
   function expenseAt(row, idx, S, t, varScale) {
     if (!hits(row, idx)) return 0;
     let a = num(row.amount, 0);
@@ -210,7 +213,7 @@
     const out = {
       S, start, N, ym: [], t: [], ageMe: [], cash: [], reserve: [], invest: [], house: [], re: [], lease: [], prepaid: [], other: [], car: [],
       debt: [], networth: [], income: [], expFixed: [], expVar: [], debtPay: [], events: [], short: [], drawn: [],
-      houseRates: hRates, low: [], evCat: [], disb: [], interest: [], sweep: [], sale: null,
+      houseRates: hRates, low: [], save: [], evCat: [], disb: [], interest: [], sweep: [], sale: null,
       open: { cash, reserve, invest, lease, prepaid, car, other, re },
     };
 
@@ -220,11 +223,13 @@
 
       let inc = 0;
       (data.Income || []).forEach(r => { inc += incomeAt(r, idx, S, t); });
-      let expF = 0, expV = 0;
+      let expF = 0, expV = 0, save = 0;
       (data.Expenses || []).forEach(r => {
         if (sold && String(r.category) === '세금') return;
+        if (S.tesla === 'skip' && /테슬라/.test(String(r.name))) return;
         const a = expenseAt(r, idx, S, t, varScale);
-        if (isY(r.variable)) expV += a; else expF += a;
+        if (isSaving(r)) save += a;           // 적금 납입: 현금 → 적금으로 옮길 뿐 비용이 아니다
+        else if (isY(r.variable)) expV += a; else expF += a;
       });
       if (sold && S.sell_mode === 'rent') expF += S.after_rent * Math.pow(1 + S.inflation / 100, t / 12);
 
@@ -266,8 +271,9 @@
         house = 0; sold = true;
       }
 
-      const lowCash = prevCash + Math.min(0, ev + disb) - 0.5 * (expF + expV + dpay);
-      cash += inc - expF - expV - dpay + ev + disb + saleCash;
+      const lowCash = prevCash + Math.min(0, ev + disb) - 0.5 * (expF + expV + dpay + save);
+      cash += inc - expF - expV - dpay - save + ev + disb + saleCash;
+      reserve += save;
 
       const ci = cash > 0 ? cash * cm : 0, ri = reserve * cm;
       cash += ci; reserve += ri;
@@ -303,6 +309,7 @@
       out.house.push(house); out.re.push(re); out.lease.push(lease); out.prepaid.push(prepaid); out.other.push(other); out.car.push(car);
       out.debt.push(debtBal);
       out.networth.push(cash + reserve + invest + house + re + lease + prepaid + other + car - debtBal);
+      out.save.push(save);
       out.income.push(inc); out.expFixed.push(expF); out.expVar.push(expV); out.debtPay.push(dpay);
       out.events.push(ev); out.short.push(short); out.drawn.push(drawn);
       out.evCat.push(evc); out.disb.push(disb); out.interest.push(ci); out.sweep.push(moved);
@@ -329,7 +336,7 @@
     };
   }
 
-  const api = { DEFAULTS, settings, simulate, sellTax, scenarioMetrics, houseRates, payment, amortBalance, num, isY, isActive, idxOf, ymOf, hits, incomeAt, expenseAt };
+  const api = { DEFAULTS, settings, simulate, sellTax, scenarioMetrics, houseRates, payment, amortBalance, num, isY, isActive, isSaving, idxOf, ymOf, hits, incomeAt, expenseAt };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   g.Engine = api;
 })(typeof window !== 'undefined' ? window : globalThis);
