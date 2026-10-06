@@ -180,6 +180,8 @@
     const ages = Array.from(new Set([45, 50, 55, S.retire_age_wife])).sort((a, b) => a - b);
     const scen = ages.map(a => Object.assign(E.scenarioMetrics(st.data, { retire_age_wife: a }, '와이프 ' + a + '세 은퇴'), { isBase: a === S.retire_age_wife }));
     st.sim = sim; st.scen = scen;
+    // 사실 기반 현금표: 자동 투자 이동·예금 이자·투자 인출 같은 가정을 빼고 입력값만으로 계산
+    st.fact = E.simulate(st.data, { sweep_pct: 0, cash_rate: 0, no_draw: 1 });
     st.adv = A.advise(st.data, sim, { now: new Date(), scenarios: scen });
     st.dirty = false;
   }
@@ -348,9 +350,10 @@
     const fin = sim.cash[cur] + sim.reserve[cur] + sim.invest[cur];
     const prop = sim.house[cur] + sim.re[cur] + sim.prepaid[cur] + sim.lease[cur] + sim.car[cur] + sim.other[cur];
     const alerts = adv.cards.filter(c => (c.level === 'risk' || c.level === 'warn') && c.tag !== '유동성').slice(0, 2);
-    const rs = riskStrip(sim, cur);
+    const fact = st.fact;
+    const rs = riskStrip(fact, cur);
     const upcoming = [];
-    for (let k = cur; k < Math.min(sim.N, cur + 12) && upcoming.length < 3; k++) { const ev = monthEvents(sim, k); if (ev.length) upcoming.push({ k, ev }); }
+    for (let k = cur; k < Math.min(fact.N, cur + 12) && upcoming.length < 3; k++) { const ev = monthEvents(fact, k); if (ev.length) upcoming.push({ k, ev }); }
     const nextHtml = upcoming.length ? upcoming.map(u => {
       const tot = u.ev.reduce((q, x) => q + x.amt, 0);
       const big = u.ev.slice().sort((a, b) => Math.abs(b.amt) - Math.abs(a.amt)).slice(0, 3);
@@ -359,7 +362,7 @@
     main.innerHTML = checksHtml() +
       '<section class="card hero"><div class="l">우리집 순자산 · ' + sim.ym[cur] + ' 말 예상</div><div class="v">' + fm(sim.networth[cur]) + '</div>' +
       '<div class="hero-split"><div><span>금융자산</span><b>' + fm(fin) + '</b></div><div><span>집·보증금·차</span><b>' + fm(prop) + '</b></div><div><span>부채</span><b>−' + fm(sim.debt[cur]) + '</b></div></div></section>' +
-      '<div class="grid g2">' + budgetCard(sim, cur) +
+      '<div class="grid g2">' + budgetCard(fact, cur) +
       '<section class="card"><div class="row-between"><h2>다가오는 큰 일정</h2>' + link('전체 일정', 'flow') + '</div><ul class="timeline">' + nextHtml + '</ul></section></div>' +
       '<section class="card"><div class="row-between"><h2>향후 12개월 현금</h2>' + link('월별 수입·지출 보기', 'flow') + '</div>' + rs.html + '</section>' +
       (alerts.length ? '<section class="card"><div class="row-between"><h2>확인할 것</h2>' + link('추천 전체', 'analysis', 'advice') + '</div>' + alerts.map(c => '<div class="note ' + c.level + '"><div class="hd"><span class="badge">' + ({ risk: '주의', warn: '점검', ok: '양호', info: '참고' }[c.level]) + '</span><span>' + esc(c.title) + '</span></div>' + (c.body ? '<div class="body">' + esc(c.body) + '</div>' : '') + '</div>').join('') + '</section>' : '');
@@ -393,7 +396,7 @@
   }
   function renderFlow() {
     ensureCompute();
-    const { sim } = st, S = sim.S;
+    const sim = st.fact, S = sim.S;
     const cur = A.curIdx(sim, new Date());
     const rs = riskStrip(sim, cur);
     const months = [];
@@ -404,11 +407,11 @@
       return '<details class="msheet' + (m.lowRisk ? ' risk' : '') + '"' + (big || i === 0 ? ' open' : '') + '><summary>' +
         '<span class="ms-m"><b>' + m.ym + '</b>' + (big ? ' <span class="badge plain">큰 일정</span>' : '') + '</span>' +
         '<span class="ms-n"><span class="pos">+' + fm(m.inTotal) + '</span><span class="neg">−' + fm(m.outTotal) + '</span></span>' +
-        '<span class="ms-e"><small>월말 현금</small><b>' + fm(m.end) + '</b></span></summary>' +
+        '<span class="ms-e"><small>월말 현금</small><b' + (m.end < 0 ? ' class="neg"' : '') + '>' + fm(m.end) + '</b></span></summary>' +
         '<div class="tacct"><div class="tcol in"><h4>들어오는 돈</h4><ul>' + (m.ins.length ? m.ins.map(line).join('') : '<li class="muted"><span>없음</span><b>0</b></li>') + '</ul><div class="ttotal"><span>합계</span><b class="pos">+' + fm(m.inTotal) + '</b></div></div>' +
         '<div class="tcol out"><h4>나가는 돈</h4><ul>' + (m.outs.length ? m.outs.map(line).join('') : '<li class="muted"><span>없음</span><b>0</b></li>') + '</ul><div class="ttotal"><span>합계</span><b class="neg">−' + fm(m.outTotal) + '</b></div></div></div>' +
         '<div class="tflow"><span>월초 현금 <b>' + fm(m.start) + '</b></span><span>' + (m.inTotal - m.outTotal >= 0 ? '+' : '−') + ' 차액 <b>' + fm(Math.abs(m.inTotal - m.outTotal)) + '</b></span><span>= 월말 현금 <b>' + fm(m.end) + '</b></span>' +
-        '<span class="' + (m.lowRisk ? 'neg' : 'muted') + '">월중 저점 ' + fm(m.low) + (m.lowRisk ? ' (경고선 아래)' : '') + '</span></div></details>';
+        '<span class="' + (m.lowRisk ? 'neg' : 'muted') + '">월중 저점 ' + fm(m.low) + (m.lowRisk ? ' (경고선 아래)' : '') + '</span>' + (m.end < 0 ? '<span class="neg"><b>현금이 ' + fm(-m.end) + ' 모자랍니다. 대출·비상금 등 메울 방법이 필요합니다.</b></span>' : '') + '</div></details>';
     }).join('');
     const evs = (st.data.Events || []).filter(e => E.isActive(e.active) && String(e.date) >= sim.ym[cur] && !(S.tesla === 'skip' && String(e.category) === 'car')).sort((a, b) => String(a.date).localeCompare(String(b.date))).slice(0, 30);
     let prevYm = '';
@@ -419,7 +422,7 @@
     main.innerHTML = pageHead('현금 일정', '앞으로 12개월 동안 들어오고 나가는 돈과 큰 일정을 월별로 봅니다. 일정은 [관리 > 큰 일정]에서 고칩니다.', link('큰 일정 고치기', 'manage', 'events')) + checksHtml() +
       '<section class="card"><h2>현금이 가장 빠듯한 달</h2>' + rs.html + '</section>' +
       '<section class="card"><div class="row-between"><h2>월별 들어오는 돈 · 나가는 돈</h2><span class="small muted">만원</span></div>' + sheetHtml +
-      '<p class="legend-note">월초 현금 + 들어오는 돈 − 나가는 돈 = 월말 현금이 되도록 맞춘 장부입니다. 큰 일정이 있는 달은 펼쳐 두었습니다. 월중 저점은 큰 지출이 월급날(25일)보다 먼저 나간다고 보고 추정한 값입니다.</p></section>' +
+      '<p class="legend-note">입력한 수입·지출·대출·큰 일정만으로 계산한 실제 현금 흐름입니다. 남는 돈 자동 투자, 예금 이자 같은 가정은 넣지 않았습니다. 월초 현금 + 들어오는 돈 − 나가는 돈 = 월말 현금입니다. 큰 일정이 있는 달은 펼쳐 두었습니다. 월중 저점은 큰 지출이 월급날(25일)보다 먼저 나간다고 보고 추정한 값입니다.</p></section>' +
       '<section class="card"><h2>현금 흐름 그래프 (36개월)</h2><div class="chart-box"><canvas id="cashChart" role="img" aria-label="월별 현금 잔액 추이"></canvas></div></section>' +
       '<section class="card"><h2>큰 일정과 순자산 변화</h2><div class="tbl-wrap mini"><table><thead><tr><th>월</th><th>내용</th><th class="r">현금</th><th class="r">순자산 영향</th><th class="r">그 달 순자산 변화</th><th class="r">월말 순자산</th></tr></thead><tbody>' + (evRows || '<tr><td colspan="6" class="muted">예정된 일정이 없습니다.</td></tr>') + '</tbody></table></div>' +
       '<p class="legend-note">집값 납부·전세 반환·차량 구입은 현금이 자산으로 바뀌는 것이라 순자산이 줄지 않습니다. 세금·수수료·이사·인테리어는 비용입니다. 순자산 변화에는 그 달의 월급·생활비·투자 수익·집값 변동도 들어 있습니다.</p></section>';

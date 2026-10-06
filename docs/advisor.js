@@ -280,7 +280,7 @@
 
   /* ---------- 자금 계획 (시작 현금 → 끝 현금) ---------- */
   function fundingPlan(data, over, toYm) {
-    const sim = E.simulate(data, Object.assign({ sweep_pct: 0 }, over));
+    const sim = E.simulate(data, Object.assign({ sweep_pct: 0, cash_rate: 0, no_draw: 1 }, over));
     const t1 = Math.max(0, sim.ym.indexOf(toYm));
     const sum = fn => { let x = 0; for (let t = 0; t <= t1; t++) x += fn(t); return x; };
     const cat = (...cs) => sum(t => cs.reduce((q, c) => q + (sim.evCat[t][c] || 0), 0));
@@ -297,8 +297,6 @@
       { label: '이사·임시거주·인테리어', val: cat('move', 'interior') },
       { label: '자동차(테슬라) 순지출', val: cat('car') },
       { label: '기타 이벤트', val: sum(t => Object.keys(sim.evCat[t]).filter(c => known.indexOf(c) < 0).reduce((q, c) => q + sim.evCat[t][c], 0)) },
-      { label: '예금 이자(세후)', val: sum(t => sim.interest[t]) },
-      { label: '투자·비상금에서 인출', val: sum(t => sim.drawn[t]) },
     ];
     let minLow = Infinity, minT = 0;
     for (let t = 0; t < Math.min(sim.N, 24); t++) if (sim.low[t] < minLow) { minLow = sim.low[t]; minT = t; }
