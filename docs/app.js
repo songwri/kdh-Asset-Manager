@@ -221,14 +221,23 @@
       const c = v < S.liquidity_floor ? 'risk' : v < S.liquidity_floor * 2 ? 'warn' : 'ok';
       cells.push('<div class="rs-cell ' + c + '"><div class="m">' + sim.ym[k].slice(2).replace('-', '.') + '</div><div class="a">' + fm(v) + '</div><div class="t">' + ({ risk: '주의', warn: '빠듯', ok: '' }[c]) + '</div></div>');
     }
+    const monthItems = k => {
+      const ym = sim.ym[k], parts = [];
+      (st.data.Events || []).filter(e => E.isActive(e.active) && String(e.date) === ym && !(S.tesla === 'skip' && String(e.category) === 'car'))
+        .forEach(e => parts.push(esc(e.name) + ' ' + signed(num(e.amount, 0))));
+      if (sim.disb[k]) parts.push('대출 실행 ' + signed(sim.disb[k]));
+      return parts.map(x => '<span class="evchip">' + x + '</span>').join('');
+    };
     const mrows = [];
     for (let k = cur; k < Math.min(sim.N, cur + 12); k++) {
       mrows.push('<tr><td>' + sim.ym[k] + '</td><td class="r">' + fm(sim.income[k]) + '</td><td class="r">' + fm(-(sim.expFixed[k] + sim.expVar[k])) + '</td><td class="r">' + fm(-sim.debtPay[k]) + '</td><td class="r">' + (sim.events[k] || sim.disb[k] ? signed(sim.events[k] + sim.disb[k]) : '<span class="muted">—</span>') + '</td><td class="r"><b>' + fm(sim.cash[k]) + '</b></td><td class="r ' + (sim.low[k] < S.liquidity_floor ? 'neg' : '') + '">' + fm(sim.low[k]) + '</td></tr>');
+      const items = monthItems(k);
+      if (items) mrows.push('<tr class="subrow"><td colspan="7">' + items + '</td></tr>');
     }
     const riskHtml = '<div class="card"><div class="row-between"><h2>향후 12개월 현금</h2><span class="small muted">월중 저점 · 경고선 ' + fm(S.liquidity_floor) + '</span></div>' +
       '<div class="small">' + (minV < S.liquidity_floor ? '<b>' + sim.ym[minK] + '에 약 ' + fm(minV) + '까지 내려가요.</b> 그 전 달 변동지출을 줄이세요.' : '경고선 아래로 내려가는 달이 없습니다.') + '</div><div class="rs">' + cells.join('') + '</div>' +
       '<div class="tbl-wrap mini" style="margin-top:12px"><table><thead><tr><th>월</th><th class="r">수입</th><th class="r">생활·고정 지출</th><th class="r">대출·할부</th><th class="r">큰 이벤트(순)</th><th class="r">월말 현금</th><th class="r">월중 저점</th></tr></thead><tbody>' + mrows.join('') + '</tbody></table></div>' +
-      '<div class="legend-note">큰 이벤트 = 집 계약금·잔금, 전세 반환, 대출 실행, 세금·이사 등. 대출 실행과 전세 반환은 같은 달 잔금으로 나가서 순액이 작게 보일 수 있습니다.</div></div>';
+      '<div class="legend-note">큰 이벤트 = 집 계약금·잔금, 전세 반환, 대출 실행, 세금·이사 등. 표의 "큰 이벤트(순)"는 아래 칩으로 나열한 항목의 합계입니다. 전세 반환·대출 실행·잔금이 같은 달에 있으면 서로 상쇄되어 순액이 작게 보입니다.</div></div>';
     const mInc = sim.income[cur], mExp = sim.expFixed[cur] + sim.expVar[cur], mDebt = sim.debtPay[cur];
     const monthHtml = '<div class="card"><h2>이번 달 수입·지출 (계획)</h2><table><tbody>' +
       '<tr><td>수입</td><td class="r">' + fm(mInc) + '</td></tr><tr><td>생활·고정 지출</td><td class="r">' + fm(-mExp) + '</td></tr><tr><td>대출·할부 상환</td><td class="r">' + fm(-mDebt) + '</td></tr>' +
