@@ -105,7 +105,7 @@
   };
   const MANAGE_INFO = {
     assets: ['Assets', '자산·현금', '은행 잔고, 비상금, 연금, 전세보증금처럼 "지금 가진 돈"을 적는 곳입니다. 주식·ETF는 [투자 종목]에 따로 적습니다.'],
-    holdings: ['Holdings', '투자 종목', '주식·ETF를 종목별로 적습니다. 시세 코드를 넣으면 1시간마다 현재가가 자동으로 바뀝니다.'],
+    holdings: ['Holdings', '투자 종목', '주식·ETF를 종목별로 적습니다. 시세 코드를 넣으면 매일 오후 4시쯤 현재가가 자동으로 바뀝니다.'],
     income: ['Income', '수입', '월급, 인센티브, 아동수당처럼 들어오는 돈입니다. 매달·매년·한 번만 중에서 고르고, 휴직처럼 쉬는 기간도 넣을 수 있습니다.'],
     expenses: ['Expenses', '고정 지출', '관리비, 유치원, 보험처럼 정해진 지출과 "생활비 기준값"을 적습니다. 매일 쓰는 돈은 [가계부]에 적습니다.'],
     debts: ['Debts', '대출·할부', '주택담보대출, 카드 할부처럼 갚아야 하는 돈입니다. 원리금균등 상환으로 계산합니다.'],
@@ -168,27 +168,62 @@
     }
   }
 
-  /* ---------- 저장 대기열: 저장에 실패한 가계부 내역을 기기에 보관했다가 다시 보낸다 ---------- */
+  /* ---------- 저장 대기열: 가계부 저장·수정·삭제는 화면에 먼저 반영하고, 시트에는 뒤에서 차례로 보낸다.
+   *  보내기 전까지 기기에 보관하므로 실패해도 잃어버리지 않고, 연결되면 자동으로 다시 보낸다. ---------- */
   const PKEY = 'am_pending';
   const loadPending = () => { try { return JSON.parse(localStorage.getItem(PKEY) || '[]'); } catch (e) { return []; } };
   const savePending = a => { try { if (a.length) localStorage.setItem(PKEY, JSON.stringify(a)); else localStorage.removeItem(PKEY); } catch (e) { /* ignore */ } };
-  let flushing = false;
+  const pkey = it => it.tab + ':' + (it.del ? it.id : it.row.id);
+  let flushing = false, inflight = null, retryTimer = null;
+  /** 저장(또는 삭제)을 대기열에 넣고 바로 보내기 시작. 같은 항목이 아직 대기 중이면 최신 것으로 바꾼다 */
+  function enqueue(it) {
+    it.at = Date.now() + Math.random();
+    const k = pkey(it);
+    const q = loadPending().filter(x => pkey(x) !== k || (inflight && x.at === inflight));
+    q.push(it); savePending(q);
+    flushPending();
+  }
+  const failedCount = () => loadPending().filter(x => x.fail).length;
   async function flushPending() {
-    const q = loadPending();
-    if (!q.length || !st.data || flushing) return;
-    flushing = true;
-    const left = []; let done = 0, stop = false;
-    for (const it of q) {
-      if (stop) { left.push(it); continue; }
+    if (flushing || !st.data || st.local) return;
+    flushing = true; clearTimeout(retryTimer);
+    let done = 0, err = null;
+    for (;;) {
+      const it = loadPending()[0];
+      if (!it) break;
+      inflight = it.at;
+      status('저장 중…' + (loadPending().length > 1 ? ' (' + loadPending().length + '건)' : ''));
       try {
-        await apiOnce('save', it);
-        const list = (st.data[it.tab] = st.data[it.tab] || []);
-        if (!list.some(r => String(r.id) === String(it.row.id))) list.push(it.row);
-        done++;
-      } catch (e) { left.push(it); if (e.auth || !st.data) stop = true; }
+        if (it.del) await apiOnce('del', { tab: it.tab, id: it.id }); else await apiOnce('save', { tab: it.tab, row: it.row });
+        savePending(loadPending().filter(x => x.at !== it.at)); done++;
+      } catch (e) {
+        err = e;
+        savePending(loadPending().map(x => (x.at === it.at ? Object.assign(x, { fail: (x.fail || 0) + 1 }) : x)));
+        break;
+      }
     }
-    savePending(left); flushing = false;
-    if (done) { st.dirty = true; toast('보관해 둔 ' + done + '건을 저장했습니다.' + (left.length ? ' (' + left.length + '건 남음)' : '')); if (st.data) render(); }
+    inflight = null; flushing = false;
+    const wasFailing = !!st.saveFailed;
+    if (err) {
+      status('저장 대기');
+      if (!st.saveFailed) toast('시트에 저장하지 못해 이 기기에 보관했습니다. 잠시 뒤 자동으로 다시 보냅니다. (' + err.message + ')', 'err');
+      st.saveFailed = true;
+      if (!err.auth) retryTimer = setTimeout(flushPending, 15000);
+    } else {
+      st.saveFailed = false;
+      if (done) status('저장됨');
+      if (wasFailing && done) toast('보관해 둔 내역을 모두 저장했습니다.');
+    }
+    if (st.data && st.tab === 'ledger' && wasFailing !== !!st.saveFailed) renderLedger();
+  }
+  /** 서버에서 불러온 데이터 위에, 아직 시트에 못 보낸 변경을 다시 얹는다 */
+  function applyPending(data) {
+    loadPending().forEach(it => {
+      const list = (data[it.tab] = data[it.tab] || []);
+      if (it.del) { data[it.tab] = list.filter(x => String(x.id) !== String(it.id)); return; }
+      const i = list.findIndex(x => String(x.id) === String(it.row.id));
+      if (i >= 0) list[i] = it.row; else list.push(it.row);
+    });
   }
   window.addEventListener('online', () => flushPending());
   const status = t => { $('#status').textContent = t; };
@@ -240,7 +275,7 @@
   }
   function showData(r) {
     st.data = r.data; st.meta = r.meta || {}; st.loadedAt = Date.now(); st.dirty = true; st.scen = null;
-    loadPending().forEach(it => { const list = (st.data[it.tab] = st.data[it.tab] || []); if (!list.some(x => String(x.id) === String(it.row.id))) list.push(it.row); });
+    applyPending(st.data);
     $('#login').classList.add('hidden'); $('#app').classList.remove('hidden');
     status(''); renderTabs(); render();
     setTimeout(() => { runRecurring().then(flushPending); }, 300);
@@ -612,7 +647,7 @@
         '<li data-lid="' + esc(r.id) + '"><span><b>' + esc(r.category) + '</b>' + (/^rec_/.test(r.id) ? ' <span class="badge plain">자동</span>' : '') + ' <span class="muted">' + (r.who === 'wife' ? names().wife : names().me) + ' · ' + esc(r.pay || '') + (r.memo ? ' · ' + esc(r.memo) : '') + '</span></span><span class="r">' + (r.type === 'income' ? '<span class="pos">+' + won(r.amount) + '</span>' : won(r.amount)) + '</span><span class="li-act"><button class="ghost sm" data-ledit>수정</button><button class="ghost danger sm" data-ldel aria-label="삭제">삭제</button></span></li>').join('') + '</ul></details>';
     }).join('');
 
-    const pend = loadPending().length;
+    const pend = st.saveFailed ? loadPending().length : 0;
     main.innerHTML = pageHead('가계부', '오늘 쓴 돈을 바로 적으세요. 나와 와이프가 함께 입력하고, 이번 달 생활비 상한과 비교합니다.') +
       (pend ? '<div class="note warn"><div class="hd"><span class="badge">저장 대기</span><span>' + pend + '건이 아직 시트에 저장되지 않았습니다</span></div><div class="body">이 기기에 안전하게 보관 중이며, 연결되면 자동으로 저장합니다.</div><div class="toolbar"><button class="primary" id="retryPending">지금 다시 저장</button></div></div>' : '') +
       '<section class="card qe"><div class="row-between"><div class="seg" role="group" aria-label="구분">' + [['expense', '지출'], ['income', '수입']].map(([v, l]) => '<button type="button" data-ltype="' + v + '"' + (st.ltype === v ? ' class="on"' : '') + '>' + l + '</button>').join('') + '</div>' +
@@ -649,24 +684,16 @@
         '<p class="small muted">한 달 이상 입력하면 분류별 권장 금액이 나옵니다.</p>') +
       (bc.avgVar != null && bc.avgVar > 0 ? '<div class="toolbar"><button id="applyAvg">최근 평균 생활비(' + fm(bc.avgVar) + ')를 미래 계산에 반영</button></div>' : '') + '</section>';
   }
-  async function addLedger() {
+  function addLedger() {
     const amt = num($('#lgAmt').value.replace(/[,\s]/g, ''), 0);
     if (!amt) { toast('금액을 입력하세요.', 'err'); $('#lgAmt').focus(); return; }
     const type = $('#lgType').value;
     const row = { id: newId('led'), date: $('#lgDate').value || todayStr(), type, amount: amt, category: $('#lgCat').value.trim() || (type === 'income' ? '기타수입' : '기타'), who: $('#lgWho').value, pay: $('#lgPay').value, memo: $('#lgMemo').value.trim() };
-    const btn = $('#lgAdd'); if (btn) btn.disabled = true;
     (st.data.Ledger = st.data.Ledger || []).push(row); st.dirty = true; st.ledgerMonth = row.date.slice(0, 7);
-    status('저장 중…');
-    let saved = false, why = '';
-    try { await api('save', { tab: 'Ledger', row }); saved = true; } catch (e) {
-      why = e.message;
-      const q = loadPending(); q.push({ tab: 'Ledger', row }); savePending(q);
-    }
-    status(saved ? '저장됨' : '저장 대기');
-    if (st.data) { try { renderLedger(); } catch (e) { /* 화면 오류가 저장 실패로 보이지 않게 */ } }
-    const label = (type === 'income' ? '수입 ' : '지출 ') + won(amt) + '원';
-    toast(saved ? label + '을 기록했습니다.' : label + '을 이 기기에 보관했습니다. 연결되면 자동으로 저장합니다. (' + why + ')', saved ? '' : 'err');
-    const a = $('#lgAmt'); if (a && st.data) a.focus();
+    try { renderLedger(); } catch (e) { /* 화면 오류가 저장을 막지 않게 */ }
+    toast((type === 'income' ? '수입 ' : '지출 ') + won(amt) + '원을 기록했습니다.');
+    const a = $('#lgAmt'); if (a) a.focus();
+    enqueue({ tab: 'Ledger', row: Object.assign({}, row) });
   }
 
   /* ---------- 가계부 수정 ---------- */
@@ -683,7 +710,7 @@
       '<div class="span2"><label class="f" for="leMemo">메모</label><input id="leMemo" value="' + esc(r.memo || '') + '"></div>' +
       '<div class="span-all toolbar"><button class="primary" data-lsave>저장</button><button class="ghost" data-lcancel>취소</button></div></div></li>';
   }
-  async function saveLedgerEdit(id) {
+  function saveLedgerEdit(id) {
     const row = (st.data.Ledger || []).find(r => String(r.id) === id);
     if (!row) return;
     const amt = num($('#leAmt').value.replace(/[,\s]/g, ''), 0);
@@ -691,14 +718,9 @@
     const date = $('#leDate').value || row.date;
     Object.assign(row, { amount: amt, category: $('#leCat').value.trim() || row.category, date, type: $('#leType').value, who: $('#leWho').value, pay: $('#lePay').value, memo: $('#leMemo').value.trim() });
     st.editLid = null; st.dirty = true; st.ledgerMonth = String(date).slice(0, 7);
-    status('저장 중…');
-    let saved = false;
-    try { await api('save', { tab: 'Ledger', row }); saved = true; } catch (e) {
-      const q = loadPending().filter(it => String(it.row.id) !== id); q.push({ tab: 'Ledger', row: Object.assign({}, row) }); savePending(q);
-    }
-    status(saved ? '저장됨' : '저장 대기');
     renderLedger();
-    toast(saved ? '수정했습니다.' : '수정 내용을 이 기기에 보관했습니다. 연결되면 자동으로 저장합니다.', saved ? '' : 'err');
+    toast('수정했습니다.');
+    enqueue({ tab: 'Ledger', row: Object.assign({}, row) });
   }
 
   /* ---------- 카드사 앱 내역 붙여넣기 ---------- */
@@ -783,22 +805,16 @@
         '<div class="toolbar"><button class="primary" id="pasteAdd">선택한 ' + rows.filter(r => r.on).length + '건 가계부에 추가</button></div>' : '<p class="legend-note">줄마다 날짜·가맹점·금액이 있으면 읽을 수 있습니다. 복사한 그대로 붙여 넣으면 됩니다. 저장 전에 표에서 분류를 확인하세요.</p>') +
       '</details>';
   }
-  async function addPasted() {
+  function addPasted() {
     const rows = (st.paste || []).filter(r => r.on);
     if (!rows.length) { toast('추가할 내역을 선택하세요.', 'err'); return; }
     const who = (() => { try { return localStorage.getItem('am_who') || 'me'; } catch (e) { return 'me'; } })();
-    const btn = $('#pasteAdd'); if (btn) btn.disabled = true;
-    let ok = 0, held = 0;
-    status('저장 중…');
-    for (const r of rows) {
-      const row = { id: newId('led'), date: r.date, type: 'expense', amount: r.amount, category: r.cat, who, pay: '카드', memo: r.name };
-      (st.data.Ledger = st.data.Ledger || []).push(row);
-      try { await api('save', { tab: 'Ledger', row }); ok++; } catch (e) { const q = loadPending(); q.push({ tab: 'Ledger', row }); savePending(q); held++; }
-    }
+    const add = rows.map(r => ({ id: newId('led'), date: r.date, type: 'expense', amount: r.amount, category: r.cat, who, pay: '카드', memo: r.name }));
+    (st.data.Ledger = st.data.Ledger || []).push(...add);
     st.dirty = true; st.paste = null; st.pasteOpen = false; st.ledgerMonth = rows[0].date.slice(0, 7);
-    status(held ? '저장 대기' : '저장됨');
     renderLedger();
-    toast(ok + '건을 추가했습니다.' + (held ? ' ' + held + '건은 이 기기에 보관 중입니다.' : ''), held ? 'err' : '');
+    toast(add.length + '건을 추가했습니다.');
+    add.forEach(row => enqueue({ tab: 'Ledger', row: Object.assign({}, row) }));
   }
 
   /* ---------- 자동 기록 (매달 정해진 날 가계부에 적기) ---------- */
@@ -881,7 +897,7 @@
     ensureCompute();
     const card = st.adv.cards.find(c => c.tag === '투자 점검');
     subEl().innerHTML = '<section class="card"><div class="row-between"><h2>보유 종목 점검</h2>' + link('종목·시세 관리', 'manage', 'holdings') + '</div>' + investReport() +
-      '<p class="legend-note">손익은 현재가 기준입니다. 시세 코드가 있는 종목은 1시간마다 현재가가 자동으로 바뀝니다.</p></section>' + (card ? noteCard(card) : '');
+      '<p class="legend-note">손익은 현재가 기준입니다. 시세 코드가 있는 종목은 매일 오후 4시쯤(장 마감 후) 현재가가 자동으로 바뀝니다.</p></section>' + (card ? noteCard(card) : '');
   }
 
   /** 자녀 학교 시점별 우리 나이와 그해 말 예상 순자산·금융자산 */
@@ -1053,8 +1069,8 @@
     const m = st.meta || {}, hs = (st.data.Holdings || []).filter(h => E.isActive(h.active));
     const withSym = hs.filter(h => String(h.symbol || '').trim()).length;
     const mins = m.pricesAt ? (Date.now() - new Date(m.pricesAt).getTime()) / 60000 : null;
-    const stale = withSym > 0 && (mins == null || mins > 180);
-    return '<section class="card"><div class="row-between"><h2>시세 자동 갱신</h2><span class="badge' + (stale || m.fails ? '' : ' plain') + '">' + (m.auto ? '켜짐 · 1시간마다' : '꺼짐') + '</span></div>' +
+    const stale = withSym > 0 && (mins == null || mins > 60 * 50);
+    return '<section class="card"><div class="row-between"><h2>시세 자동 갱신</h2><span class="badge' + (stale || m.fails ? '' : ' plain') + '">' + (m.auto ? '켜짐 · 하루 한 번' : '꺼짐') + '</span></div>' +
       '<p class="small">시세 코드가 있는 종목 ' + withSym + '/' + hs.length + '개 · 마지막 갱신 <b>' + ago(m.pricesAt) + '</b>' + (stale ? ' <b class="neg">(오래됨)</b>' : '') + '</p>' +
       (m.lastErr ? '<div class="note warn"><div class="body">최근 문제: ' + esc(m.lastErr) + '</div></div>' : '') +
       (!m.auto ? '<p class="small muted">자동 갱신은 구글 시트 메뉴 [자산관리 > ④ 시세 자동 갱신 켜기]로 켭니다.</p>' : '') +
@@ -1086,7 +1102,7 @@
       '<p class="small muted">보안코드는 링크에 들어 있지 않으니 따로 알려주세요. 링크에는 연결 주소가 들어 있으니 공개된 곳에 올리지 마세요.</p></section>' +
       '<section class="card"><h2>보안</h2><ul class="plain"><li>데이터는 구글 시트에만 있고, 이 사이트 코드에는 개인정보가 없습니다.</li><li>보안코드는 구글 시트 메뉴 [자산관리 > ② 보안코드 설정]에서 바꿉니다. 5번 틀리면 15분 잠깁니다.</li><li>접속은 6시간 뒤 자동으로 끝납니다.</li></ul>' +
       '<div class="toolbar"><button id="moreSync">시트에서 다시 불러오기</button><button class="ghost" id="moreOut">나가기</button></div></section>' +
-      '<section class="card"><h2>시장 데이터 (예정)</h2><p class="small">주가는 GOOGLEFINANCE로 1시간마다 갱신됩니다. 금리·환율(한국은행 ECOS, 미국 FRED) 수집과 시장 추천은 다음 단계에서 추가합니다.</p></section>';
+      '<section class="card"><h2>시장 데이터 (예정)</h2><p class="small">주가는 GOOGLEFINANCE로 하루 한 번(오후 4시쯤) 갱신됩니다. 금리·환율(한국은행 ECOS, 미국 FRED) 수집과 시장 추천은 다음 단계에서 추가합니다.</p></section>';
   }
   function renderManage() {
     const s = st.subs.manage;
@@ -1196,7 +1212,7 @@
       return;
     }
     if (t.closest('#lgAdd')) { addLedger(); return; }
-    if (t.closest('#retryPending')) { flushPending().then(() => { if (st.tab === 'ledger') renderLedger(); }); return; }
+    if (t.closest('#retryPending')) { flushPending(); return; }
     if (t.closest('[data-ledit]')) { st.editLid = t.closest('[data-lid]').dataset.lid; renderLedger(); const a = $('#leAmt'); if (a) a.focus(); return; }
     if (t.closest('[data-lcancel]')) { st.editLid = null; renderLedger(); return; }
     if (t.closest('[data-lsave]')) { saveLedgerEdit(t.closest('[data-lid]').dataset.lid); return; }
@@ -1211,7 +1227,8 @@
     if (t.closest('[data-ldel]')) {
       const id = t.closest('[data-lid]').dataset.lid;
       if (!confirm('이 내역을 삭제할까요?')) return;
-      try { await api('del', { tab: 'Ledger', id }); st.data.Ledger = st.data.Ledger.filter(r => String(r.id) !== id); st.dirty = true; renderLedger(); toast('삭제했습니다.'); } catch (err) { toast('삭제하지 못했습니다: ' + err.message, 'err'); }
+      st.data.Ledger = st.data.Ledger.filter(r => String(r.id) !== id); st.dirty = true; renderLedger(); toast('삭제했습니다.');
+      enqueue({ tab: 'Ledger', del: true, id });
       return;
     }
     if (t.closest('#applyAvg')) {
@@ -1270,7 +1287,7 @@
     if (document.visibilityState !== 'visible' || !st.data || st.local || Date.now() - (st.loadedAt || 0) < 15 * 60 * 1000) return;
     try {
       const r = await api('all');
-      st.data = r.data; st.meta = r.meta || {}; st.loadedAt = Date.now(); st.dirty = true;
+      st.data = r.data; applyPending(st.data); st.meta = r.meta || {}; st.loadedAt = Date.now(); st.dirty = true;
       const typing = document.activeElement && /^(INPUT|SELECT|TEXTAREA)$/.test(document.activeElement.tagName);
       if (!typing && ['home', 'flow', 'analysis'].indexOf(st.tab) >= 0) { const y = window.scrollY; render(); window.scrollTo(0, y); }
     } catch (e) { /* 다음 기회에 */ }

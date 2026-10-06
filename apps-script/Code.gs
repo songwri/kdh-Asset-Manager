@@ -47,7 +47,7 @@ function onOpen() {
     .addItem('② 보안코드 설정', 'promptPin')
     .addItem('③ 초기 데이터 입력 (Seed.gs 필요)', 'runSeed')
     .addSeparator()
-    .addItem('④ 시세 자동 갱신 켜기 (1시간마다)', 'enableAutoRefresh')
+    .addItem('④ 시세 자동 갱신 켜기 (매일 오후 4시)', 'enableAutoRefresh')
     .addItem('⑤ 시세 지금 갱신', 'refreshNow')
     .addItem('⑥ 시세 자동 갱신 끄기', 'disableAutoRefresh')
     .addToUi();
@@ -372,10 +372,10 @@ function refreshPrices_(opts) {
     q.getRange(2, 2, syms.length, 1).setFormulas(syms.map(function (x, i) { return ['=GOOGLEFINANCE(A' + (i + 2) + ',"price")']; }));
     SpreadsheetApp.flush();
 
-    let prices = {};
+    let prices = {}, out = [];
     for (let attempt = 1; attempt <= 4; attempt++) {
       Utilities.sleep(2000 * attempt);
-      const out = q.getRange(2, 2, syms.length, 1).getValues();
+      out = q.getRange(2, 2, syms.length, 1).getValues();
       prices = {};
       let pending = 0;
       syms.forEach(function (x, i) {
@@ -384,6 +384,8 @@ function refreshPrices_(opts) {
       });
       if (!pending) break;
     }
+    // 수식을 값으로 바꿔 둔다: GOOGLEFINANCE 수식이 남아 있으면 시트가 수시로 다시 계산해 저장이 느려진다
+    q.getRange(2, 2, syms.length, 1).setValues(out.map(function (r) { return [typeof r[0] === 'number' ? r[0] : '']; }));
 
     // 쓰는 순간에만 짧게 잠금. 기다리는 사이 행이 지워지거나 옮겨졌을 수 있으니 id로 다시 찾는다
     const at = stamp_(now);
@@ -418,9 +420,11 @@ function refreshPrices_(opts) {
   }
 }
 
-/** 1시간마다 실행되는 트리거 함수 */
+/** 매일 한 번(오후 4시, 장 마감 후) 실행되는 트리거 함수 */
 function autoRefresh() {
   const props = PropertiesService.getScriptProperties();
+  // 예전 1시간 트리거가 남아 있으면 하루 한 번으로 바꾼다 (코드만 붙여넣어도 자동 전환)
+  if (props.getProperty('TRIGGER_KIND') !== 'daily') { try { installDailyTrigger_(); } catch (e) { /* 다음 실행 때 다시 */ } }
   try {
     const r = refreshPrices_({ auto: true });
     if (r.updated === 0 && r.failed.length > 0) throw new Error(r.message + ' ' + r.failed.join(', '));
@@ -440,12 +444,17 @@ function disableAutoRefresh_() {
   });
 }
 
-function enableAutoRefresh() {
+function installDailyTrigger_() {
   disableAutoRefresh_();
-  ScriptApp.newTrigger('autoRefresh').timeBased().everyHours(1).create();
+  ScriptApp.newTrigger('autoRefresh').timeBased().everyDays(1).atHour(16).inTimezone('Asia/Seoul').create();
+  PropertiesService.getScriptProperties().setProperty('TRIGGER_KIND', 'daily');
+}
+
+function enableAutoRefresh() {
+  installDailyTrigger_();
   PropertiesService.getScriptProperties().setProperty('AUTO_ON', '1');
   PropertiesService.getScriptProperties().setProperty('REFRESH_FAILS', '0');
-  try { SpreadsheetApp.getUi().alert('시세 자동 갱신을 켰습니다 (1시간마다).\n\n실패 알림: Apps Script 왼쪽 [트리거] > autoRefresh 편집 > 실패 알림 설정에서 "즉시 알림"을 고르면 메일로 받을 수 있습니다.'); } catch (e) { /* ignore */ }
+  try { SpreadsheetApp.getUi().alert('시세 자동 갱신을 켰습니다 (매일 오후 4시쯤, 장 마감 후).\n\n실패 알림: Apps Script 왼쪽 [트리거] > autoRefresh 편집 > 실패 알림 설정에서 "즉시 알림"을 고르면 메일로 받을 수 있습니다.'); } catch (e) { /* ignore */ }
 }
 
 function disableAutoRefresh() {
