@@ -9,7 +9,7 @@
   const main = $('#main');
 
   const st = { data: null, tab: 'dash', sub: 'Income', over: {}, charts: {}, ledgerMonth: null, dirty: true, local: false };
-  const TABS = [['dash', '대시보드'], ['ledger', '가계부'], ['advice', '추천'], ['invest', '투자'], ['sim', '시뮬레이션'], ['input', '입력'], ['settings', '설정'], ['guide', '가이드']];
+  const TABS = [['dash', '홈'], ['ledger', '가계부'], ['advice', '추천'], ['invest', '투자'], ['sim', '시뮬레이션'], ['input', '입력'], ['settings', '설정'], ['guide', '가이드']];
   const SUBS = [['Income', '수입'], ['Expenses', '지출(계획)'], ['Assets', '자산·현금'], ['Debts', '대출·할부'], ['Events', '이벤트']];
 
   const COLS = {
@@ -151,7 +151,7 @@
       rows.map(r => '<tr data-id="' + esc(r.id) + '">' + cols.map(c => '<td>' + cell(c, r[c[0]]) + '</td>').join('') + '<td><button class="ghost danger" data-del>삭제</button></td></tr>').join('') +
       '</tbody></table></div><div class="toolbar"><button data-add="' + tab + '">+ 행 추가</button></div>';
   }
-  const noteCard = c => '<div class="note ' + c.level + '"><div class="hd"><span class="badge">' + ({ risk: '⚠ 주의', warn: '▲ 점검', ok: '✓ 양호', info: 'ⓘ 참고' }[c.level]) + '</span><span class="badge">' + esc(c.tag) + '</span><span>' + esc(c.title) + '</span></div>' +
+  const noteCard = c => '<div class="note ' + c.level + '"><div class="hd"><span class="badge">' + ({ risk: '주의', warn: '점검', ok: '양호', info: '참고' }[c.level]) + '</span><span class="badge plain">' + esc(c.tag) + '</span><span>' + esc(c.title) + '</span></div>' +
     (c.body ? '<div class="body">' + esc(c.body) + '</div>' : '') + (c.list.length ? '<ul>' + c.list.map(l => '<li>' + esc(l) + '</li>').join('') + '</ul>' : '') + '</div>';
   const kpi = (l, v, s) => '<div class="kpi"><div class="l">' + l + '</div><div class="v">' + v + '</div>' + (s ? '<div class="s">' + s + '</div>' : '') + '</div>';
   const signed = v => '<span class="' + (v < 0 ? 'neg' : v > 0 ? 'pos' : '') + '">' + (v > 0 ? '+' : '') + fm(v) + '</span>';
@@ -165,21 +165,42 @@
     const surplus = sim.income[cur] - sim.expFixed[cur] - sim.expVar[cur] - sim.debtPay[cur];
     const fin = t => sim.cash[t] + sim.reserve[t] + sim.invest[t];
     const last = sim.N - 1;
-    const alerts = adv.cards.filter(c => c.level === 'risk' || c.level === 'warn').slice(0, 4);
+    const alerts = adv.cards.filter(c => (c.level === 'risk' || c.level === 'warn') && c.tag !== '유동성').slice(0, 3);
     const evs = (st.data.Events || []).filter(e => E.isActive(e.active) && String(e.date) >= sim.ym[cur]).sort((a, b) => String(a.date).localeCompare(String(b.date))).slice(0, 16);
-    main.innerHTML =
-      '<div class="grid g4" style="margin-bottom:12px">' +
-      kpi('순자산 (' + sim.ym[cur] + ' 말 예상)', fm(sim.networth[cur]), '집·전세금·부채 포함') +
-      kpi('현금 (입출금·단기)', fm(sim.cash[cur]), '월중 저점 ' + fm(sim.low[cur])) +
-      kpi('투자·연금 자산', fm(sim.invest[cur]), '비상금 ' + fm(sim.reserve[cur]) + ' 별도') +
-      kpi('이번 달 잉여 (이벤트 제외)', signed(surplus), '수입 ' + fm(sim.income[cur]) + ' · 지출 ' + fm(sim.expFixed[cur] + sim.expVar[cur] + sim.debtPay[cur])) +
-      '</div><div class="grid g4" style="margin-bottom:16px">' +
-      kpi('향후 2년 현금 저점', fm(adv.minCash), adv.minYm + ' (월중 추정)') +
+
+    const prop = sim.house[cur] + sim.re[cur] + sim.prepaid[cur] + sim.lease[cur] + sim.car[cur] + sim.other[cur];
+    const hero = '<div class="card hero"><div class="l">순자산 · ' + sim.ym[cur] + ' 말 예상</div><div class="v">' + fm(sim.networth[cur]) + '</div><div class="s"><span>금융 ' + fm(fin(cur)) + '</span><span>집·보증금·차 ' + fm(prop) + '</span><span>부채 −' + fm(sim.debt[cur]) + '</span></div></div>';
+
+    const led = st.data.Ledger || [];
+    const bc = A.budgetCap(st.data, sim, led, new Date());
+    const ms = A.monthStats(led, sim.ym[cur]);
+    const cap = bc.cur.cap, spent = ms.variable, remain = cap - spent, ratio = cap > 0 ? spent / cap : 0;
+    const now = new Date(), dim = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate(), daysLeft = Math.max(1, dim - now.getDate() + 1);
+    const lvl = ratio > 1 ? 'risk' : ratio > 0.8 ? 'warn' : '';
+    const budgetHtml = '<div class="card"><div class="row-between"><h2>이번 달 변동지출</h2><span class="small muted">상한 ' + fm(cap) + '</span></div>' +
+      (ms.count ? '<div class="big-num">' + fm(spent) + ' <span class="small muted">상한의 ' + Math.round(ratio * 100) + '%</span></div>' +
+        '<div class="bar ' + lvl + '" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="' + Math.min(100, Math.round(ratio * 100)) + '" style="margin-top:8px"><i style="width:' + Math.min(100, ratio * 100) + '%"></i></div>' +
+        '<div class="small" style="margin-top:8px">' + (remain >= 0 ? '남은 ' + fm(remain) + ' · 하루 ' + fm(remain / daysLeft) + (lvl === 'warn' ? ' · 80% 넘었어요' : '') : '<b>상한 초과 ' + fm(-remain) + '</b>') + '</div>' :
+        '<div class="muted small">이번 달 입력한 지출이 아직 없습니다.</div><div class="toolbar"><button class="primary" data-tab="ledger">가계부 입력하기</button></div>') +
+      (bc.cur.tighten > 0 ? '<div class="small muted" style="margin-top:6px">' + esc(bc.cur.tightenYm) + '의 큰 지출에 대비해 상한을 ' + fm(bc.cur.tighten) + ' 낮췄어요.</div>' : '') + '</div>';
+
+    const cells = []; let minV = Infinity, minK = cur;
+    for (let k = cur; k < Math.min(sim.N, cur + 12); k++) {
+      const v = sim.low[k]; if (v < minV) { minV = v; minK = k; }
+      const c = v < S.liquidity_floor ? 'risk' : v < S.liquidity_floor * 2 ? 'warn' : 'ok';
+      cells.push('<div class="rs-cell ' + c + '"><div class="m">' + sim.ym[k].slice(2).replace('-', '.') + '</div><div class="a">' + fm(v) + '</div><div class="t">' + ({ risk: '주의', warn: '빠듯', ok: '' }[c]) + '</div></div>');
+    }
+    const riskHtml = '<div class="card"><div class="row-between"><h2>향후 12개월 현금</h2><span class="small muted">월중 저점 · 경고선 ' + fm(S.liquidity_floor) + '</span></div>' +
+      '<div class="small">' + (minV < S.liquidity_floor ? '<b>' + sim.ym[minK] + '에 약 ' + fm(minV) + '까지 내려가요.</b> 그 전 달 변동지출을 줄이세요.' : '경고선 아래로 내려가는 달이 없습니다.') + '</div><div class="rs">' + cells.join('') + '</div></div>';
+
+    main.innerHTML = hero + '<div class="grid g2">' + budgetHtml + riskHtml + '</div>' +
+      '<div class="grid g4" style="margin-bottom:14px">' +
+      kpi('현금 (입출금·단기)', fm(sim.cash[cur]), '비상금 ' + fm(sim.reserve[cur]) + ' 별도') +
+      kpi('투자·연금 자산', fm(sim.invest[cur]), '이번 달 잉여 ' + signed(surplus)) +
       kpi('부채 잔액', fm(sim.debt[cur]), '월 상환 ' + fm(sim.debtPay[Math.min(last, cur + 8)])) +
-      kpi('10년 후 순자산', fm(sim.networth[Math.min(last, 119)]), sim.ym[Math.min(last, 119)]) +
       kpi('30년 후 순자산', fm(sim.networth[last]), sim.ym[last] + ' · 본인 ' + sim.ageMe[last] + '세') +
       '</div>' +
-      (alerts.length ? '<div class="card"><h2>지금 확인할 것</h2>' + alerts.map(noteCard).join('') + '<div class="small muted">전체 추천은 [추천] 탭에서 확인하세요.</div></div>' : '') +
+      (alerts.length ? '<div class="card"><h2>그 밖에 확인할 것</h2>' + alerts.map(noteCard).join('') + '<div class="small muted">전체 추천은 [추천]에서 확인하세요.</div></div>' : '') +
       '<div class="grid g2"><div class="card"><h2>현금 잔액 (향후 36개월)</h2><div class="chart-box"><canvas id="cashChart" role="img" aria-label="월별 현금 잔액 추이"></canvas></div><div class="legend-note">월중 저점 = 큰 지출이 월급일(25일)보다 먼저 나간다고 보고 추정한 값</div></div>' +
       '<div class="card"><h2>순자산 (30년)</h2><div class="chart-box"><canvas id="nwChart" role="img" aria-label="연도별 순자산 추이"></canvas></div><div class="legend-note">집값은 연평균 ' + S.house_mean + '%에 맞춘 가상의 등락 경로입니다 (실제 예측 아님)</div></div></div>' +
       '<div class="card"><h2>앞으로의 주요 이벤트</h2><div class="tbl-wrap"><table><thead><tr><th>월</th><th>항목</th><th class="r">금액</th><th>확정</th><th>메모</th></tr></thead><tbody>' +
@@ -211,13 +232,16 @@
     const ratio = capNow > 0 ? ms.variable / capNow : 0;
     const lvl = ratio > 1 ? 'risk' : ratio > 0.8 ? 'warn' : '';
     const rows = led.filter(r => String(r.date).slice(0, 7) === st.ledgerMonth).sort((a, b) => String(b.date).localeCompare(String(a.date)));
+    const who = (() => { try { return localStorage.getItem('am_who') || 'me'; } catch (e) { return 'me'; } })();
     main.innerHTML =
-      '<div class="card"><h2>지출 입력</h2><div class="form-row">' +
+      '<div class="card"><div class="row-between"><h2>지출 입력</h2><div class="seg" role="group" aria-label="입력자">' + [['me', '나'], ['wife', '와이프']].map(([w, l]) => '<button type="button" data-who="' + w + '"' + (who === w ? ' class="on"' : '') + '>' + l + '</button>').join('') + '</div></div>' +
+      '<input type="hidden" id="lgWho" value="' + who + '">' +
+      '<input id="lgAmt" class="qe-amt" inputmode="numeric" placeholder="0" aria-label="금액(원)">' +
+      '<div class="chips" role="group" aria-label="분류">' + CATS_VAR.map(c => '<button type="button" class="chip" data-cat="' + c + '">' + c + '</button>').join('') + '</div>' +
+      '<div class="form-row">' +
+      '<div><label class="f">분류 직접 입력 (고정지출은 "고정-…")</label><input id="lgCat" list="catList" placeholder="식비"><datalist id="catList">' + CATS_VAR.concat(CATS_FIX).map(c => '<option value="' + c + '">').join('') + '</datalist></div>' +
       '<div><label class="f">날짜</label><input type="date" id="lgDate" value="' + todayStr() + '"></div>' +
       '<div><label class="f">구분</label><select id="lgType"><option value="expense">지출</option><option value="income">수입</option></select></div>' +
-      '<div><label class="f">금액(원)</label><input id="lgAmt" inputmode="numeric" placeholder="15000"></div>' +
-      '<div><label class="f">분류</label><input id="lgCat" list="catList" placeholder="식비"><datalist id="catList">' + CATS_VAR.concat(CATS_FIX).map(c => '<option value="' + c + '">').join('') + '</datalist></div>' +
-      '<div><label class="f">누가</label><select id="lgWho"><option value="me">나</option><option value="wife">와이프</option></select></div>' +
       '<div><label class="f">결제</label><select id="lgPay"><option>카드</option><option>현금</option><option>이체</option></select></div>' +
       '<div style="grid-column:span 2"><label class="f">메모</label><input id="lgMemo"></div>' +
       '<div><button class="primary" id="lgAdd" style="width:100%">추가</button></div></div>' +
@@ -226,7 +250,7 @@
       '<div class="grid g2"><div class="card"><h2>' + esc(st.ledgerMonth) + ' 지출 현황</h2>' +
       '<div class="toolbar"><select id="lgMonth" style="width:auto">' + months.map(m => '<option' + (m === st.ledgerMonth ? ' selected' : '') + '>' + m + '</option>').join('') + '</select></div>' +
       '<div class="grid g3"><div class="kpi"><div class="l">총 지출</div><div class="v">' + fm(ms.total) + '</div></div><div class="kpi"><div class="l">고정</div><div class="v">' + fm(ms.fixed) + '</div></div><div class="kpi"><div class="l">변동</div><div class="v">' + fm(ms.variable) + '</div></div></div>' +
-      (isCur ? '<div style="margin-top:12px"><div class="small">변동지출 상한 ' + fm(capNow) + ' 중 ' + Math.round(ratio * 100) + '% 사용 ' + (lvl === 'risk' ? '— ⚠ 초과' : lvl === 'warn' ? '— ▲ 80% 넘음' : '— ✓ 여유') + '</div><div class="bar ' + lvl + '"><i style="width:' + Math.min(100, ratio * 100) + '%"></i></div></div>' : '') +
+      (isCur ? '<div style="margin-top:12px"><div class="small">변동지출 상한 ' + fm(capNow) + ' 중 ' + Math.round(ratio * 100) + '% 사용 ' + (lvl === 'risk' ? '— 초과' : lvl === 'warn' ? '— 80% 넘음' : '— 여유') + '</div><div class="bar ' + lvl + '"><i style="width:' + Math.min(100, ratio * 100) + '%"></i></div></div>' : '') +
       '</div>' +
       '<div class="card"><h2>' + esc(bc.next.ym) + ' 권장 변동지출 상한: ' + fm(bc.next.cap) + '</h2>' +
       (bc.next.tighten > 0 ? '<div class="note warn" style="margin:8px 0"><div class="body">' + esc(bc.next.tightenYm) + '의 큰 지출로 현금이 경고선 아래로 내려갑니다. 그때까지 매달 ' + fm(bc.next.tighten) + '씩 더 아끼도록 상한에서 뺐습니다.</div></div>' : '') +
@@ -266,7 +290,7 @@
       '<div><h3>입주 후 안정기 (월 평균 잉여 ' + fm(adv.steadySurplus) + ')</h3>' + allocTable(adv.allocSteady) + '</div></div>' +
       '<div class="legend-note">우선순위: 현금 버퍼 → 비상금 → 세액공제 → 자녀 적립 → 대출 상환/ISA 투자. 규칙 기반 제안이며 투자 권유가 아닙니다.</div></div>' +
       adv.cards.slice().sort((a, b) => order[a.level] - order[b.level]).map(noteCard).join('') +
-      '<div class="note info"><div class="hd"><span class="badge">ⓘ 참고</span><span class="badge">시장</span><span>증시·금리·환율·경제 이슈</span></div><div class="body">시장 데이터 자동 수집은 다음 단계입니다. [가이드] 탭의 연결 방법을 참고하세요.</div></div>';
+      '<div class="note info"><div class="hd"><span class="badge">참고</span><span class="badge plain">시장</span><span>증시·금리·환율·경제 이슈</span></div><div class="body">시장 데이터 자동 수집은 다음 단계입니다. [가이드] 탭의 연결 방법을 참고하세요.</div></div>';
   }
 
   /* ---------- 투자 ---------- */
@@ -349,18 +373,33 @@
   }
 
   /* ---------- 라우팅 ---------- */
+  const ICONS = {
+    dash: '<path d="M3 11l9-8 9 8v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/>',
+    ledger: '<rect x="5" y="3" width="14" height="18" rx="2"/><path d="M9 8h6M9 12h6M9 16h3"/>',
+    advice: '<path d="M12 3a6 6 0 0 0-3.5 10.9c.6.5 1 1.2 1 2V17h5v-1.1c0-.8.4-1.5 1-2A6 6 0 0 0 12 3z"/><path d="M10 20.5h4"/>',
+    invest: '<path d="M4 19V5M4 19h16"/><path d="M8 15l4-4 3 3 5-6"/>',
+    more: '<circle cx="5" cy="12" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="19" cy="12" r="1.4"/>',
+  };
+  const BOTTOM = [['dash', '홈'], ['ledger', '가계부'], ['advice', '추천'], ['invest', '투자'], ['more', '더보기']];
+  const MORE = [['sim', '시뮬레이션', '은퇴 시기·집값 가정 바꿔보기'], ['input', '입력', '수입·지출·자산·대출·이벤트'], ['settings', '설정', '가정값, 보안'], ['guide', '가이드', '시장 데이터 연결, 보안 구조']];
   function renderTabs() {
     $('#tabs').innerHTML = TABS.map(([k, l]) => '<button data-tab="' + k + '"' + (st.tab === k ? ' class="on"' : '') + '>' + l + '</button>').join('');
+    const inMore = ['more', 'sim', 'input', 'settings', 'guide'].indexOf(st.tab) >= 0;
+    $('#bottomnav').innerHTML = BOTTOM.map(([k, l]) => '<button data-tab="' + k + '"' + ((k === 'more' ? inMore : st.tab === k) ? ' class="on"' : '') + ' aria-label="' + l + '"><svg viewBox="0 0 24 24" aria-hidden="true">' + ICONS[k] + '</svg>' + l + '</button>').join('');
+  }
+  function renderMore() {
+    main.innerHTML = '<div class="card more-list"><h2>더보기</h2>' + MORE.map(([k, l, d]) => '<button data-tab="' + k + '"><span>' + l + '<br><small>' + d + '</small></span><span class="muted">›</span></button>').join('') +
+      '<button id="moreSync"><span>시트에서 다시 불러오기</span><span class="muted">↻</span></button><button id="moreOut"><span>나가기</span><span class="muted">›</span></button></div>';
   }
   function render() {
     if (!st.data) return;
     Object.keys(st.charts).forEach(k => { try { st.charts[k].destroy(); } catch (e) { /* ignore */ } delete st.charts[k]; });
-    ({ dash: renderDash, ledger: renderLedger, advice: renderAdvice, invest: renderInvest, sim: renderSim, input: renderInput, settings: renderSettings, guide: renderGuide })[st.tab]();
+    ({ more: renderMore, dash: renderDash, ledger: renderLedger, advice: renderAdvice, invest: renderInvest, sim: renderSim, input: renderInput, settings: renderSettings, guide: renderGuide })[st.tab]();
     window.scrollTo(0, 0);
   }
 
   /* ---------- 이벤트 ---------- */
-  $('#tabs').addEventListener('click', e => { const b = e.target.closest('[data-tab]'); if (!b) return; st.tab = b.dataset.tab; renderTabs(); render(); });
+  ['#tabs', '#bottomnav'].forEach(sel => $(sel).addEventListener('click', e => { const b = e.target.closest('[data-tab]'); if (!b) return; st.tab = b.dataset.tab; renderTabs(); render(); }));
   $('#loginBtn').addEventListener('click', doLogin);
   $('#pin').addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
   $('#logoutBtn').addEventListener('click', () => logout(false));
@@ -384,6 +423,16 @@
   main.addEventListener('click', async e => {
     const t = e.target;
     let b;
+    if ((b = t.closest('[data-tab]'))) { st.tab = b.dataset.tab; renderTabs(); render(); return; }
+    if (t.closest('#moreSync')) { loadAll().catch(err => alert(err.message)); return; }
+    if (t.closest('#moreOut')) { logout(false); return; }
+    if ((b = t.closest('[data-who]'))) {
+      $('#lgWho').value = b.dataset.who; try { localStorage.setItem('am_who', b.dataset.who); } catch (err) { /* ignore */ }
+      main.querySelectorAll('[data-who]').forEach(x => x.classList.toggle('on', x === b)); return;
+    }
+    if ((b = t.closest('[data-cat]'))) {
+      $('#lgCat').value = b.dataset.cat; main.querySelectorAll('[data-cat]').forEach(x => x.classList.toggle('on', x === b)); return;
+    }
     if ((b = t.closest('[data-sub]'))) { st.sub = b.dataset.sub; renderInput(); return; }
     if ((b = t.closest('[data-add]'))) {
       const tab = b.dataset.add, row = Object.assign({ id: newId(tab.slice(0, 3).toLowerCase()) }, DEFAULT_ROW[tab] || {});
@@ -422,6 +471,7 @@
       try { for (const k of Object.keys(st.over)) await saveSettingValue(k, st.over[k]); st.over = {}; status('저장됨 ✓'); renderSim(); } catch (err) { alert(err.message); }
     }
   });
+  main.addEventListener('keydown', e => { if (e.key === 'Enter' && e.target.id === 'lgAmt') addLedger(); });
   main.addEventListener('change', e => {
     if (e.target.id === 'lgMonth') { st.ledgerMonth = e.target.value; renderLedger(); }
   });
