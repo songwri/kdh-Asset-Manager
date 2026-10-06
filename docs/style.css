@@ -148,3 +148,24 @@ code { background: var(--surface-2); padding: 1px 5px; border-radius: 4px; font-
 .chip.on { background: var(--ink); color: var(--ink-on); border-color: var(--ink); }
 .more-list button { display: flex; width: 100%; justify-content: space-between; align-items: center; padding: 16px 4px; border: 0; border-bottom: 1px solid var(--line); border-radius: 0; background: transparent; text-align: left; font-size: 16px; }
 .more-list small { color: var(--muted); }
+
+/* scenario / tables */
+.mini table { font-size: 13px; } .mini th, .mini td { padding: 6px 7px; }
+.cmp th, .cmp td { padding: 9px 10px; }
+.cmp tr.hl td, table tr.hl td { background: var(--warn-bg); }
+.cmp tr.strongrow td { background: var(--surface-2); border-top: 1px solid var(--line); }
+ul.plain { margin: 8px 0 0; padding-left: 18px; color: var(--text-2); }
+ul.plain li { margin: 6px 0; }
+.g3 .kpi .v { font-size: 24px; }
+.keep3 { grid-template-columns: repeat(3, 1fr) !important; }
+.cmp td:first-child { white-space: normal; min-width: 110px; }
+@media (max-width: 480px) {
+  .keep3 .kpi { padding: 10px; } .keep3 .kpi .v { font-size: 17px; } .keep3 .kpi .l, .keep3 .kpi .s { font-size: 11px; }
+  .cmp th, .cmp td { padding: 8px 5px; font-size: 13px; }
+}
+.keep3 { grid-template-columns: repeat(3, 1fr) !important; }
+.cmp td:first-child { white-space: normal; min-width: 110px; }
+@media (max-width: 480px) {
+  .keep3 .kpi { padding: 10px; } .keep3 .kpi .v { font-size: 17px; } .keep3 .kpi .l, .keep3 .kpi .s { font-size: 11px; }
+  .cmp th, .cmp td { padding: 8px 5px; font-size: 13px; }
+}

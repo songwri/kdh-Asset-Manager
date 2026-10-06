@@ -9,7 +9,7 @@
   const main = $('#main');
 
   const st = { data: null, tab: 'dash', sub: 'Income', over: {}, charts: {}, ledgerMonth: null, dirty: true, local: false };
-  const TABS = [['dash', '홈'], ['ledger', '가계부'], ['advice', '추천'], ['invest', '투자'], ['sim', '시뮬레이션'], ['input', '입력'], ['settings', '설정'], ['guide', '가이드']];
+  const TABS = [['dash', '홈'], ['ledger', '가계부'], ['advice', '추천'], ['invest', '투자'], ['scn', '시나리오'], ['sim', '시뮬레이션'], ['input', '입력'], ['settings', '설정'], ['guide', '가이드']];
   const SUBS = [['Income', '수입'], ['Expenses', '지출(계획)'], ['Assets', '자산·현금'], ['Debts', '대출·할부'], ['Events', '이벤트']];
 
   const COLS = {
@@ -34,6 +34,10 @@
     invest_return: ['투자 기대수익률', '%'], inflation: ['물가상승률', '%'], salary_growth: ['연봉 상승률', '%'], cash_rate: ['예금 금리', '%'],
     liquidity_floor: ['현금 경고선', '만원'], emergency_months: ['비상금 목표', '개월 생활비'], save_rate_target: ['목표 저축률', '%'],
     buffer_months: ['현금 보유 목표(초과분은 투자로 이동)', '개월 지출'], sweep_pct: ['초과 현금의 투자 이동 비율', '%'], variable_override: ['변동 생활비 실측값(0이면 계획값 사용)', '만원/월'],
+    house_target: ['집 목표 매도가', '만원'], move_in_ym: ['입주월 (실거주 시작)', 'YYYY-MM'], sell_ym: ['매도월 (비우면 매도 안 함)', 'YYYY-MM'], sell_mode: ['매도 후 주거 (jeonse 또는 rent)', ''],
+    sell_fee_pct: ['매도 중개보수율(VAT 포함)', '%'], house_basis_extra: ['취득 부대비용(취득세·중개·등기)', '만원'], house_capex: ['양도세 경비로 인정될 공사비', '만원'],
+    after_deposit: ['매도 후 전세 보증금', '만원'], after_rent: ['매도 후 월세', '만원/월'], after_rent_deposit: ['월세 보증금', '만원'],
+    tesla: ['테슬라 (buy 또는 skip)', ''], tesla_fin_pct: ['테슬라 할부 비율', '%'], tesla_rate: ['테슬라 할부 금리', '%'], tesla_term: ['테슬라 할부 기간', '개월'],
     child_birth_year: ['자녀 출생연도', ''], sim_start: ['시뮬레이션 시작월', 'YYYY-MM'], years: ['시뮬레이션 기간', '년'],
   };
   const CATS_VAR = ['식비', '생활용품', '교통/차량', '의료', '여가/외식', '쇼핑/의류', '경조사/선물', '기타'];
@@ -147,6 +151,21 @@
   }
 
   /* ---------- 공통 UI ---------- */
+  function commaFmt(raw) {
+    const m = /^(-?)(\d*)(\.\d*)?$/.exec(String(raw));
+    if (!m) return String(raw);
+    return m[1] + m[2].replace(/\B(?=(\d{3})+(?!\d))/g, ',') + (m[3] || '');
+  }
+  /** 숫자 입력칸에 천 단위 쉼표를 넣고, 저장용 순수 숫자 문자열을 돌려준다 */
+  function liveFormat(t) {
+    if (!t.dataset.num) return t.value;
+    const end = t.value.length - (t.selectionStart == null ? t.value.length : t.selectionStart);
+    const raw = t.value.replace(/,/g, '');
+    if (!/^-?\d*\.?\d*$/.test(raw)) return raw;
+    const f = commaFmt(raw);
+    if (f !== t.value) { t.value = f; const pos = Math.max(0, f.length - end); try { t.setSelectionRange(pos, pos); } catch (e) { /* ignore */ } }
+    return raw;
+  }
   function cell(c, v) {
     const [k, , type] = c;
     if (type.indexOf('select:') === 0) {
@@ -154,7 +173,8 @@
       if (v && opts.indexOf(String(v)) < 0) opts.push(String(v));
       return '<select data-k="' + k + '">' + opts.map(o => '<option value="' + esc(o) + '"' + (o === String(v == null ? '' : v) ? ' selected' : '') + '>' + esc(o) + '</option>').join('') + '</select>';
     }
-    return '<input data-k="' + k + '" value="' + esc(v) + '"' + (type === 'num' ? ' inputmode="decimal"' : '') + (type === 'month' ? ' placeholder="YYYY-MM" size="8"' : '') + '>';
+    if (type === 'num') return '<input data-k="' + k + '" data-num="1" inputmode="decimal" value="' + esc(commaFmt(v == null ? '' : v)) + '">';
+    return '<input data-k="' + k + '" value="' + esc(v) + '"' + (type === 'month' ? ' placeholder="YYYY-MM" size="8"' : '') + '>';
   }
   function editTable(tab, rows) {
     const cols = COLS[tab];
@@ -177,7 +197,7 @@
     const fin = t => sim.cash[t] + sim.reserve[t] + sim.invest[t];
     const last = sim.N - 1;
     const alerts = adv.cards.filter(c => (c.level === 'risk' || c.level === 'warn') && c.tag !== '유동성').slice(0, 3);
-    const evs = (st.data.Events || []).filter(e => E.isActive(e.active) && String(e.date) >= sim.ym[cur]).sort((a, b) => String(a.date).localeCompare(String(b.date))).slice(0, 16);
+    const evs = (st.data.Events || []).filter(e => E.isActive(e.active) && String(e.date) >= sim.ym[cur]).sort((a, b) => String(a.date).localeCompare(String(b.date))).slice(0, 24);
 
     const prop = sim.house[cur] + sim.re[cur] + sim.prepaid[cur] + sim.lease[cur] + sim.car[cur] + sim.other[cur];
     const hero = '<div class="card hero"><div class="l">순자산 · ' + sim.ym[cur] + ' 말 예상</div><div class="v">' + fm(sim.networth[cur]) + '</div><div class="s"><span>금융 ' + fm(fin(cur)) + '</span><span>집·보증금·차 ' + fm(prop) + '</span><span>부채 −' + fm(sim.debt[cur]) + '</span></div></div>';
@@ -201,10 +221,20 @@
       const c = v < S.liquidity_floor ? 'risk' : v < S.liquidity_floor * 2 ? 'warn' : 'ok';
       cells.push('<div class="rs-cell ' + c + '"><div class="m">' + sim.ym[k].slice(2).replace('-', '.') + '</div><div class="a">' + fm(v) + '</div><div class="t">' + ({ risk: '주의', warn: '빠듯', ok: '' }[c]) + '</div></div>');
     }
+    const mrows = [];
+    for (let k = cur; k < Math.min(sim.N, cur + 12); k++) {
+      mrows.push('<tr><td>' + sim.ym[k] + '</td><td class="r">' + fm(sim.income[k]) + '</td><td class="r">' + fm(-(sim.expFixed[k] + sim.expVar[k])) + '</td><td class="r">' + fm(-sim.debtPay[k]) + '</td><td class="r">' + (sim.events[k] || sim.disb[k] ? signed(sim.events[k] + sim.disb[k]) : '<span class="muted">—</span>') + '</td><td class="r"><b>' + fm(sim.cash[k]) + '</b></td><td class="r ' + (sim.low[k] < S.liquidity_floor ? 'neg' : '') + '">' + fm(sim.low[k]) + '</td></tr>');
+    }
     const riskHtml = '<div class="card"><div class="row-between"><h2>향후 12개월 현금</h2><span class="small muted">월중 저점 · 경고선 ' + fm(S.liquidity_floor) + '</span></div>' +
-      '<div class="small">' + (minV < S.liquidity_floor ? '<b>' + sim.ym[minK] + '에 약 ' + fm(minV) + '까지 내려가요.</b> 그 전 달 변동지출을 줄이세요.' : '경고선 아래로 내려가는 달이 없습니다.') + '</div><div class="rs">' + cells.join('') + '</div></div>';
+      '<div class="small">' + (minV < S.liquidity_floor ? '<b>' + sim.ym[minK] + '에 약 ' + fm(minV) + '까지 내려가요.</b> 그 전 달 변동지출을 줄이세요.' : '경고선 아래로 내려가는 달이 없습니다.') + '</div><div class="rs">' + cells.join('') + '</div>' +
+      '<div class="tbl-wrap mini" style="margin-top:12px"><table><thead><tr><th>월</th><th class="r">수입</th><th class="r">생활·고정 지출</th><th class="r">대출·할부</th><th class="r">큰 이벤트(순)</th><th class="r">월말 현금</th><th class="r">월중 저점</th></tr></thead><tbody>' + mrows.join('') + '</tbody></table></div>' +
+      '<div class="legend-note">큰 이벤트 = 집 계약금·잔금, 전세 반환, 대출 실행, 세금·이사 등. 대출 실행과 전세 반환은 같은 달 잔금으로 나가서 순액이 작게 보일 수 있습니다.</div></div>';
+    const mInc = sim.income[cur], mExp = sim.expFixed[cur] + sim.expVar[cur], mDebt = sim.debtPay[cur];
+    const monthHtml = '<div class="card"><h2>이번 달 수입·지출 (계획)</h2><table><tbody>' +
+      '<tr><td>수입</td><td class="r">' + fm(mInc) + '</td></tr><tr><td>생활·고정 지출</td><td class="r">' + fm(-mExp) + '</td></tr><tr><td>대출·할부 상환</td><td class="r">' + fm(-mDebt) + '</td></tr>' +
+      '<tr><td><b>잉여</b></td><td class="r"><b>' + signed(mInc - mExp - mDebt) + '</b></td></tr></tbody></table><div class="legend-note">큰 이벤트는 제외한 금액입니다.</div></div>';
 
-    main.innerHTML = hero + '<div class="grid g2">' + budgetHtml + riskHtml + '</div>' +
+    main.innerHTML = hero + '<div class="grid g2">' + budgetHtml + monthHtml + '</div>' + riskHtml +
       '<div class="grid g4" style="margin-bottom:14px">' +
       kpi('현금 (입출금·단기)', fm(sim.cash[cur]), '비상금 ' + fm(sim.reserve[cur]) + ' 별도') +
       kpi('투자·연금 자산', fm(sim.invest[cur]), '이번 달 잉여 ' + signed(surplus)) +
@@ -214,9 +244,9 @@
       (alerts.length ? '<div class="card"><h2>그 밖에 확인할 것</h2>' + alerts.map(noteCard).join('') + '<div class="small muted">전체 추천은 [추천]에서 확인하세요.</div></div>' : '') +
       '<div class="grid g2"><div class="card"><h2>현금 잔액 (향후 36개월)</h2><div class="chart-box"><canvas id="cashChart" role="img" aria-label="월별 현금 잔액 추이"></canvas></div><div class="legend-note">월중 저점 = 큰 지출이 월급일(25일)보다 먼저 나간다고 보고 추정한 값</div></div>' +
       '<div class="card"><h2>순자산 (30년)</h2><div class="chart-box"><canvas id="nwChart" role="img" aria-label="연도별 순자산 추이"></canvas></div><div class="legend-note">집값은 연평균 ' + S.house_mean + '%에 맞춘 가상의 등락 경로입니다 (실제 예측 아님)</div></div></div>' +
-      '<div class="card"><h2>앞으로의 주요 이벤트</h2><div class="tbl-wrap"><table><thead><tr><th>월</th><th>항목</th><th class="r">금액</th><th>확정</th><th>메모</th></tr></thead><tbody>' +
-      evs.map(e => '<tr><td>' + esc(e.date) + '</td><td>' + esc(e.name) + '</td><td class="r">' + signed(num(e.amount, 0)) + '</td><td>' + (e.certain === 'Y' ? '확정' : '추정') + '</td><td class="muted">' + esc(e.note) + '</td></tr>').join('') +
-      '</tbody></table></div></div>';
+      '<div class="card"><h2>앞으로의 주요 이벤트와 자산 변화</h2><div class="tbl-wrap mini"><table><thead><tr><th>월</th><th>항목</th><th class="r">현금 영향</th><th class="r">순자산 영향</th><th class="r">그 달 순자산 변화</th><th class="r">월말 순자산</th></tr></thead><tbody>' +
+      (() => { let prevYm = ''; return evs.map(e => { const t = sim.ym.indexOf(e.date); const eff = A.eventNwEffect(e); const first = e.date !== prevYm; prevYm = e.date; return '<tr><td>' + esc(e.date) + '</td><td>' + esc(e.name) + (e.certain === 'Y' ? '' : ' <span class="badge plain">추정</span>') + '</td><td class="r">' + signed(num(e.amount, 0)) + '</td><td class="r">' + (eff === 0 ? '<span class="muted">0 (자산 전환)</span>' : signed(eff)) + '</td><td class="r">' + (!first ? '<span class="muted">〃</span>' : t > 0 ? signed(sim.networth[t] - sim.networth[t - 1]) : '—') + '</td><td class="r">' + (!first ? '<span class="muted">〃</span>' : t >= 0 ? '<b>' + fm(sim.networth[t]) + '</b>' : '—') + '</td></tr>'; }).join(''); })() +
+      '</tbody></table></div><div class="legend-note">집 계약금·중도금·잔금, 전세 반환, 차량 구입은 현금이 집·차 같은 자산으로 바뀌는 것이라 순자산에는 영향이 없습니다. 세금·수수료·이사·인테리어는 비용으로 순자산이 줄어듭니다. 순자산 변화에는 그 달의 월급·생활비·투자 수익·집값 변동도 포함됩니다.</div></div>';
     const n = Math.min(36, sim.N - cur), ix = Array.from({ length: n }, (_, i) => cur + i);
     mkChart('cashChart', ix.map(t => sim.ym[t]), [
       { label: '월말 현금', data: ix.map(t => sim.cash[t]), borderColor: cssv('--s1') },
@@ -247,7 +277,7 @@
     main.innerHTML =
       '<div class="card"><div class="row-between"><h2>지출 입력</h2><div class="seg" role="group" aria-label="입력자">' + [['me', '나'], ['wife', '와이프']].map(([w, l]) => '<button type="button" data-who="' + w + '"' + (who === w ? ' class="on"' : '') + '>' + l + '</button>').join('') + '</div></div>' +
       '<input type="hidden" id="lgWho" value="' + who + '">' +
-      '<input id="lgAmt" class="qe-amt" inputmode="numeric" placeholder="0" aria-label="금액(원)">' +
+      '<input id="lgAmt" class="qe-amt" data-num="1" inputmode="numeric" placeholder="0" aria-label="금액(원)">' +
       '<div class="chips" role="group" aria-label="분류">' + CATS_VAR.map(c => '<button type="button" class="chip" data-cat="' + c + '">' + c + '</button>').join('') + '</div>' +
       '<div class="form-row">' +
       '<div><label class="f">분류 직접 입력 (고정지출은 "고정-…")</label><input id="lgCat" list="catList" placeholder="식비"><datalist id="catList">' + CATS_VAR.concat(CATS_FIX).map(c => '<option value="' + c + '">').join('') + '</datalist></div>' +
@@ -375,7 +405,7 @@
     const S = E.settings(st.data);
     const keys = Object.keys(E.DEFAULTS);
     main.innerHTML = '<div class="card"><h2>가정값 설정</h2><div class="tbl-wrap"><table class="set-table"><thead><tr><th>항목</th><th>값</th><th>단위</th></tr></thead><tbody>' +
-      keys.map(k => '<tr data-k="' + k + '"><td>' + esc((SETTING_LABELS[k] || [k])[0]) + ' <span class="muted small">' + k + '</span></td><td><input value="' + esc(S[k]) + '"></td><td class="muted">' + esc((SETTING_LABELS[k] || ['', ''])[1]) + '</td></tr>').join('') +
+      keys.map(k => '<tr data-k="' + k + '"><td>' + esc((SETTING_LABELS[k] || [k])[0]) + ' <span class="muted small">' + k + '</span></td><td><input' + (typeof E.DEFAULTS[k] === 'number' ? ' data-num="1" inputmode="decimal" value="' + esc(commaFmt(String(S[k]))) : ' value="' + esc(S[k])) + '"></td><td class="muted">' + esc((SETTING_LABELS[k] || ['', ''])[1]) + '</td></tr>').join('') +
       '</tbody></table></div></div>' +
       '<div class="card"><h2>가족 폰에 연결하기</h2><p class="small muted">아래 링크를 와이프에게 보내 한 번 열게 하면, 그 폰에는 연결 주소가 저장되고 이후에는 보안코드만 입력하면 됩니다. 링크에는 연결 주소가 들어 있으니 카카오톡 같은 개인 채팅으로만 보내세요.</p>' +
       '<input id="inviteLink" readonly value="' + esc(inviteLink()) + '"><div class="toolbar"><button class="primary" id="copyInvite">링크 복사</button><span class="small muted" id="copyMsg"></span></div>' +
@@ -391,6 +421,129 @@
       '<details><summary>4. 이 사이트의 보안 구조</summary><p class="small">데이터는 구글 시트에만 있고, 이 페이지(코드)에는 개인정보가 없습니다. Apps Script는 보안코드를 확인한 뒤 6시간짜리 토큰을 주고, 토큰 없이는 데이터를 반환하지 않습니다. 웹 앱 URL과 보안코드는 가족 외에 공유하지 마세요.</p></details></div>';
   }
 
+  /* ---------- 시나리오 (테슬라 · 자금 계획 · 집 매도) ---------- */
+  function scnState() {
+    if (!st.scn) {
+      const S = E.settings(st.data);
+      st.scn = { sub: 'plan', pct: 60, rate: 6, term: 60, toYm: '2027-04', target: S.house_target, deposit: S.after_deposit, rent: S.after_rent, rentDep: S.after_rent_deposit, sellYm: '' };
+    }
+    return st.scn;
+  }
+  const numIn = (id, label, val) => '<div><label class="f" for="' + id + '">' + label + '</label><input id="' + id + '" data-num="1" inputmode="decimal" value="' + esc(commaFmt(String(val))) + '"></div>';
+  const readNum = id => num((($('#' + id) || {}).value || '').replace(/,/g, ''), 0);
+  const dash = '<span class="muted">—</span>';
+  const fmv = v => (v == null || isNaN(v) ? dash : fm(v));
+  const sgn = v => (v == null || isNaN(v) ? dash : signed(v));
+
+  function renderScn() {
+    const sc = scnState();
+    main.innerHTML = '<div class="sub"><button data-scn-sub="plan"' + (sc.sub === 'plan' ? ' class="on"' : '') + '>테슬라 · 자금 계획</button><button data-scn-sub="sell"' + (sc.sub === 'sell' ? ' class="on"' : '') + '>집 매도 시나리오</button></div><div id="scnBody"></div>';
+    (sc.sub === 'sell' ? renderScnSell : renderScnPlan)();
+  }
+
+  function renderScnPlan() {
+    const sc = scnState();
+    const defs = [
+      ['현금으로 구매', { tesla: 'buy', tesla_fin_pct: 0 }],
+      ['구매 취소', { tesla: 'skip' }],
+      ['할부 ' + sc.pct + '%', { tesla: 'buy', tesla_fin_pct: sc.pct, tesla_rate: sc.rate, tesla_term: sc.term }],
+    ];
+    const plans = defs.map(([label, o]) => ({ label, o, p: A.fundingPlan(st.data, o, sc.toYm) }));
+    const [buy, skip, fin] = plans;
+    const S = buy.p.sim.S;
+    const carCost = -buy.p.rows.find(r => /자동차/.test(r.label)).val;
+    const principal = (st.data.Events || []).filter(e => E.isActive(e.active) && String(e.category) === 'car' && num(e.amount, 0) < 0 && /잔금/.test(e.name)).reduce((q, e) => q - num(e.amount, 0), 0) * sc.pct / 100;
+    const totalInterest = principal > 0 ? E.payment(principal, sc.rate / 1200, sc.term) * sc.term - principal : 0;
+    const after = pl => { const t0 = pl.p.sim.ym.indexOf(sc.toYm); let m = Infinity, k = t0; for (let t = t0; t < Math.min(pl.p.sim.N, t0 + 12); t++) if (pl.p.sim.low[t] < m) { m = pl.p.sim.low[t]; k = t; } return { v: m, ym: pl.p.sim.ym[k] }; };
+    const kp = (pl, strong) => '<div class="kpi"' + (strong ? ' style="border-color:var(--ink)"' : '') + '><div class="l">' + esc(pl.label) + '</div><div class="v">' + fm(pl.p.end) + '</div><div class="s">' + esc(sc.toYm) + ' 말 현금</div></div>';
+    const rowsHtml = buy.p.rows.map((r, i) => '<tr' + (/자동차/.test(r.label) ? ' class="hl"' : '') + (r.strong ? ' class="strongrow"' : '') + '><td>' + esc(r.label) + '</td>' + plans.map(pl => '<td class="r">' + (r.strong ? '<b>' + fm(pl.p.rows[i].val) + '</b>' : sgn(pl.p.rows[i].val)) + '</td>').join('') + '</tr>').join('');
+    const extra = (label, fn) => '<tr><td>' + label + '</td>' + plans.map(pl => '<td class="r">' + fn(pl) + '</td>').join('') + '</tr>';
+    main.querySelector('#scnBody').innerHTML =
+      '<div class="card"><h2>테슬라를 사면, 안 사면, 할부로 사면</h2><div class="small muted">집 구입 일정(계약금·중도금·잔금·세금·인테리어)을 모두 반영해 ' + esc(sc.toYm) + ' 말까지 남는 현금을 비교합니다. 남는 돈은 투자로 옮기지 않고 전부 현금으로 둔 계산입니다.</div>' +
+      '<div class="ctl" style="margin-top:10px">' + numIn('scPct', '할부 비율(%)', sc.pct) + numIn('scRate', '할부 금리(%)', sc.rate) + numIn('scTerm', '할부 기간(개월)', sc.term) + '<div><label class="f" for="scTo">비교 기준월</label><input id="scTo" value="' + esc(sc.toYm) + '" placeholder="YYYY-MM"></div></div>' +
+      '<div class="toolbar"><button class="primary" id="scnCalc">계산</button></div></div>' +
+      '<div class="grid g3 keep3" style="margin-bottom:14px">' + kp(skip, true) + kp(fin) + kp(buy) + '</div>' +
+      '<div class="card"><h2>한눈에 보기</h2><ul class="plain">' +
+      '<li>테슬라를 <b>사지 않으면</b> ' + esc(sc.toYm) + ' 말 현금이 <b>' + fm(skip.p.end) + '</b> 남습니다. 현금으로 사면 ' + fm(buy.p.end) + ', 차이는 ' + fm(skip.p.end - buy.p.end) + '입니다 (차량 잔금·취득세 순지출 ' + fm(carCost) + ' + 계약금 카드 할부 등 ' + fm(skip.p.end - buy.p.end - carCost) + ').</li>' +
+      '<li>할부 ' + sc.pct + '%(' + sc.rate + '%, ' + sc.term + '개월)로 사면 현금은 현금 구매보다 ' + fm(fin.p.end - buy.p.end) + ' 더 남지만, 매달 갚는 돈이 ' + fm(fin.p.payAfter - buy.p.payAfter) + ' 늘고 총 이자는 약 ' + fm(totalInterest) + '입니다.</li>' +
+      '<li>입주 후 12개월 중 가장 빠듯한 월중 현금: 구매 ' + fm(after(buy).v) + '(' + after(buy).ym + ') · 할부 ' + fm(after(fin).v) + '(' + after(fin).ym + ') · 취소 ' + fm(after(skip).v) + '(' + after(skip).ym + ')</li>' +
+      '<li>가장 빠듯한 달은 2년 전체로 보면 ' + buy.p.minYm + ' (' + fm(buy.p.minLow) + ')이며, 이 달은 테슬라 선택과 상관없이 집 계약금 때문에 생깁니다.</li>' +
+      '</ul></div>' +
+      '<div class="card"><h2>' + esc(sc.toYm) + '까지 자금 계획 (시작 현금 → 끝 현금)</h2><div class="tbl-wrap"><table class="cmp"><thead><tr><th></th>' + plans.map(pl => '<th class="r">' + esc(pl.label) + '</th>').join('') + '</tr></thead><tbody>' + rowsHtml +
+      '<tr class="strongrow"><td><b>끝 현금</b></td>' + plans.map(pl => '<td class="r"><b>' + fm(pl.p.end) + '</b></td>').join('') + '</tr>' +
+      extra('비상금 (별도 보관)', pl => fm(pl.p.reserve)) + extra('투자·연금 자산', pl => fm(pl.p.invest)) + extra('순자산', pl => fm(pl.p.nw)) +
+      extra('다음 달 대출·할부 상환액', pl => fm(pl.p.payAfter)) +
+      '</tbody></table></div>' +
+      '<div class="legend-note">구매 취소는 계약금 500만원을 환불받고 카드 할부도 함께 취소되는 것으로 가정했습니다(실제 환불 조건 확인 필요). 할부 금리·기간은 임의 가정이며 견적을 받으면 바꿔 넣으세요. 대출 실행은 주택 구입 자금이며 차량 구입에는 쓰지 않았습니다.</div>' +
+      '<div class="toolbar"><button data-apply="tesla:buy">현금 구매로 기본 계획에 반영</button><button data-apply="tesla:fin">할부로 기본 계획에 반영</button><button data-apply="tesla:skip">구매 취소로 기본 계획에 반영</button></div></div>';
+  }
+
+  function renderScnSell() {
+    const sc = scnState();
+    const over = { house_target: sc.target, after_deposit: sc.deposit, after_rent: sc.rent, after_rent_deposit: sc.rentDep };
+    const sa = A.sellAnalysis(st.data, over);
+    const S = sa.S;
+    let ym = /^\d{4}-\d{2}$/.test(sc.sellYm) ? sc.sellYm : (sa.hit ? sa.hit.ym : sa.earliestYm);
+    let ymNote = '';
+    if (E.idxOf(ym) < sa.earliestIdx) { ym = sa.earliestYm; ymNote = '입력한 월이 실거주 2년 이전이라 가장 빠른 시점으로 바꿨습니다.'; }
+    const cmp = A.afterSaleCompare(st.data, over, ym);
+    const later = sa.hit ? sa.monthly.find(m => m.idx === sa.hit.idx + 24) : null;
+    const yRows = sa.yearly.slice(0, 27).map(r => '<tr' + (r.price >= S.house_target ? ' class="hl"' : '') + '><td>' + r.ym + '</td><td class="r">' + r.age + '세</td><td class="r">' + fm(r.price) + '</td><td class="r">' + Math.round(r.price / S.house_target * 100) + '%</td><td class="r">' + fm(-r.tax) + '</td><td class="r">' + fm(-r.fee) + '</td><td class="r">' + fm(-r.repay) + '</td><td class="r"><b>' + fm(r.net) + '</b></td><td class="r">' + (r.annual * 100).toFixed(1) + '%</td></tr>').join('');
+    const col = (fn) => cmp.map(c => '<td class="r">' + fn(c) + '</td>').join('');
+    const hasSale = c => !!c.sale;
+    main.querySelector('#scnBody').innerHTML =
+      '<div class="card"><h2>집 매도 계획</h2><div class="small muted">목표 매도가를 정하면, 그 가격에 처음 도달하는 시점과 그때 손에 쥐는 돈, 매도 후 현금흐름을 계산합니다. 집값은 [설정]의 연평균 ' + S.house_mean + '% 가정으로 만든 가상의 등락 경로입니다.</div>' +
+      '<div class="ctl" style="margin-top:10px">' + numIn('sTarget', '목표 매도가(만원)', sc.target) + '<div><label class="f" for="sYm">매도월 (비우면 자동)</label><input id="sYm" value="' + esc(sc.sellYm) + '" placeholder="YYYY-MM"></div>' +
+      numIn('sDep', '매도 후 전세 보증금(만원)', sc.deposit) + numIn('sRent', '월세로 갈 경우 월세(만원)', sc.rent) + numIn('sRentDep', '월세 보증금(만원)', sc.rentDep) + '</div>' +
+      '<div class="toolbar"><button class="primary" id="scnCalc">계산</button></div></div>' +
+      '<div class="card"><h2>목표가 ' + fm(S.house_target) + ' 기준</h2>' +
+      (sa.hit ? '<div class="big-num">' + sa.hit.ym + ' <span class="small muted">본인 ' + sa.hit.age + '세 · 집값 ' + fm(sa.hit.price) + '</span></div>' +
+        '<div class="small" style="margin-top:6px">양도세 ' + fm(sa.hit.tax) + ' · 중개보수 ' + fm(sa.hit.fee) + ' · 대출 상환 ' + fm(sa.hit.repay) + ' → <b>손에 쥐는 돈 ' + fm(sa.hit.net) + '</b></div>' :
+        '<div class="note warn"><div class="body">현재 가정(연평균 ' + S.house_mean + '%)으로는 50년 안에 목표가에 도달하지 못합니다. 목표가를 낮추거나 [시뮬레이션]에서 상승률 가정을 바꿔 보세요.</div></div>') +
+      '<ul class="plain" style="margin-top:10px">' +
+      '<li>가장 빠른 매도 가능 시점: <b>' + sa.earliestYm + '</b> (입주 ' + S.move_in_ym + ' 후 2년 실거주 충족). 토지거래허가 구역은 2년 실거주 의무가 있어 그 전에는 팔 수 없습니다.</li>' +
+      '<li>1세대 1주택은 양도가 12억 이하면 양도세가 없고, 12억 초과분에만 과세됩니다. 보유·거주 기간이 길수록 장기보유특별공제가 커집니다(각 연 4%, 합산 최대 80%).</li>' +
+      (later && sa.hit ? '<li>목표 도달 후 2년 더 보유하면: 양도세 ' + fm(sa.hit.tax) + ' → ' + fm(later.tax) + ', 손에 쥐는 돈 ' + fm(sa.hit.net) + ' → ' + fm(later.net) + ' (집값 ' + fm(later.price) + ')</li>' : '') +
+      '<li>세금은 개략 추정입니다(필요경비는 취득세·중개·등기 ' + fm(S.house_basis_extra) + ' + 인정 공사비 ' + fm(S.house_capex) + ' 가정). 실제 매도 전에 세무사 확인이 필요합니다.</li></ul></div>' +
+      '<div class="card"><h2>매도 시점별 손에 쥐는 돈 (매년 4월 기준)</h2><div class="tbl-wrap mini"><table><thead><tr><th>시점</th><th class="r">나이</th><th class="r">집값</th><th class="r">목표 대비</th><th class="r">양도세</th><th class="r">중개보수</th><th class="r">대출 상환</th><th class="r">손에 쥐는 돈</th><th class="r">연 환산 세후 수익률</th></tr></thead><tbody>' + yRows + '</tbody></table></div>' +
+      '<div class="legend-note">강조된 줄은 목표가 이상인 해입니다. 연 환산 세후 수익률 = (집값 − 세금 − 중개보수) ÷ 총 취득비용(매입가+부대비용+공사비)을 보유 연수로 환산한 값(대출 이자·보유비는 제외)입니다.</div></div>' +
+      '<div class="card"><h2>' + ym + ' 매도 후 현금흐름 시나리오</h2>' + (ymNote ? '<div class="small muted">' + ymNote + '</div>' : '') +
+      '<div class="tbl-wrap"><table class="cmp"><thead><tr><th></th>' + cmp.map(c => '<th class="r">' + esc(c.label) + '</th>').join('') + '</tr></thead><tbody>' +
+      '<tr><td>집 매도가</td>' + col(c => hasSale(c) ? fm(c.sale.price) : dash) + '</tr>' +
+      '<tr><td>양도세</td>' + col(c => hasSale(c) ? fm(-c.sale.tax) : dash) + '</tr>' +
+      '<tr><td>중개보수</td>' + col(c => hasSale(c) ? fm(-c.sale.fee) : dash) + '</tr>' +
+      '<tr><td>대출 상환</td>' + col(c => hasSale(c) ? fm(-c.sale.repay) : dash) + '</tr>' +
+      '<tr class="strongrow"><td><b>손에 쥐는 돈</b></td>' + col(c => hasSale(c) ? '<b>' + fm(c.sale.net) + '</b>' : dash) + '</tr>' +
+      '<tr><td>새 거주지 보증금</td>' + col(c => hasSale(c) ? fm(-c.sale.deposit) : dash) + '</tr>' +
+      '<tr class="strongrow"><td><b>투자로 돌릴 수 있는 돈</b></td>' + col(c => hasSale(c) ? '<b>' + fm(c.sale.net - c.sale.deposit) + '</b>' : dash) + '</tr>' +
+      '<tr><td>월 수입 (전 → 후)</td>' + col(c => fm(c.incBefore) + ' → ' + fm(c.incAfter)) + '</tr>' +
+      '<tr><td>월 지출·대출·월세 (전 → 후)</td>' + col(c => fm(c.expBefore) + ' → ' + fm(c.expAfter)) + '</tr>' +
+      '<tr class="strongrow"><td><b>월 잉여 (전 → 후)</b></td>' + col(c => '<b>' + fm(c.surBefore) + ' → ' + fm(c.surAfter) + '</b>') + '</tr>' +
+      '<tr><td>매도 1년 뒤 순자산</td>' + col(c => fm(c.nw1)) + '</tr>' +
+      '<tr><td>65세 순자산</td>' + col(c => fm(c.nw65)) + '</tr>' +
+      '<tr><td>65세 금융자산 (부채 차감)</td>' + col(c => fm(c.fin65)) + '</tr>' +
+      '<tr><td>금융자산 소진 나이</td>' + col(c => (c.depleteAge ? '<span class="neg">' + c.depleteAge + '세</span>' : '<span class="pos">소진 없음</span>')) + '</tr>' +
+      '</tbody></table></div>' +
+      '<div class="legend-note">매도 후에는 대출 상환과 재산세가 사라지고, 전세는 보증금이 묶이며 월세는 매달 나갑니다. 매도로 생긴 돈 중 보증금을 뺀 금액은 투자로 옮겨 연 ' + S.invest_return + '% 수익을 가정합니다. 집값 상승·세금·월세는 가정이므로 결과는 참고용입니다. 월 수입 변화에는 은퇴 시점의 영향도 섞여 있습니다.</div>' +
+      '<div class="toolbar"><button data-apply="sell:jeonse:' + ym + '">전세 이주로 기본 계획에 반영</button><button data-apply="sell:rent:' + ym + '">월세 이주로 기본 계획에 반영</button><button class="ghost" data-apply="sell:clear">매도 계획 지우기</button></div></div>';
+  }
+
+  async function applyScenario(spec) {
+    const sc = scnState(), p = spec.split(':');
+    const put = (k, v) => saveSettingValue(k, v);
+    try {
+      if (p[0] === 'tesla') {
+        if (p[1] === 'buy') { await put('tesla', 'buy'); await put('tesla_fin_pct', 0); }
+        if (p[1] === 'skip') { await put('tesla', 'skip'); }
+        if (p[1] === 'fin') { await put('tesla', 'buy'); await put('tesla_fin_pct', sc.pct); await put('tesla_rate', sc.rate); await put('tesla_term', sc.term); }
+      } else if (p[0] === 'sell') {
+        if (p[1] === 'clear') { await put('sell_ym', ''); }
+        else { await put('sell_ym', p[2]); await put('sell_mode', p[1]); await put('house_target', sc.target); await put('after_deposit', sc.deposit); await put('after_rent', sc.rent); await put('after_rent_deposit', sc.rentDep); }
+      }
+      status('저장됨 ✓'); st.dirty = true; alert('기본 계획에 반영했습니다. 홈과 추천의 숫자가 이 시나리오로 바뀝니다.'); renderScn();
+    } catch (err) { status('저장 실패'); alert(err.message); }
+  }
+
   /* ---------- 라우팅 ---------- */
   const ICONS = {
     dash: '<path d="M3 11l9-8 9 8v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/>',
@@ -400,10 +553,10 @@
     more: '<circle cx="5" cy="12" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="19" cy="12" r="1.4"/>',
   };
   const BOTTOM = [['dash', '홈'], ['ledger', '가계부'], ['advice', '추천'], ['invest', '투자'], ['more', '더보기']];
-  const MORE = [['sim', '시뮬레이션', '은퇴 시기·집값 가정 바꿔보기'], ['input', '입력', '수입·지출·자산·대출·이벤트'], ['settings', '설정', '가정값, 보안'], ['guide', '가이드', '시장 데이터 연결, 보안 구조']];
+  const MORE = [['scn', '시나리오', '테슬라 구매 · 자금 계획 · 집 매도'], ['sim', '시뮬레이션', '은퇴 시기·집값 가정 바꿔보기'], ['input', '입력', '수입·지출·자산·대출·이벤트'], ['settings', '설정', '가정값, 보안'], ['guide', '가이드', '시장 데이터 연결, 보안 구조']];
   function renderTabs() {
     $('#tabs').innerHTML = TABS.map(([k, l]) => '<button data-tab="' + k + '"' + (st.tab === k ? ' class="on"' : '') + '>' + l + '</button>').join('');
-    const inMore = ['more', 'sim', 'input', 'settings', 'guide'].indexOf(st.tab) >= 0;
+    const inMore = ['more', 'scn', 'sim', 'input', 'settings', 'guide'].indexOf(st.tab) >= 0;
     $('#bottomnav').innerHTML = BOTTOM.map(([k, l]) => '<button data-tab="' + k + '"' + ((k === 'more' ? inMore : st.tab === k) ? ' class="on"' : '') + ' aria-label="' + l + '"><svg viewBox="0 0 24 24" aria-hidden="true">' + ICONS[k] + '</svg>' + l + '</button>').join('');
   }
   function renderMore() {
@@ -413,7 +566,7 @@
   function render() {
     if (!st.data) return;
     Object.keys(st.charts).forEach(k => { try { st.charts[k].destroy(); } catch (e) { /* ignore */ } delete st.charts[k]; });
-    ({ more: renderMore, dash: renderDash, ledger: renderLedger, advice: renderAdvice, invest: renderInvest, sim: renderSim, input: renderInput, settings: renderSettings, guide: renderGuide })[st.tab]();
+    ({ scn: renderScn, more: renderMore, dash: renderDash, ledger: renderLedger, advice: renderAdvice, invest: renderInvest, sim: renderSim, input: renderInput, settings: renderSettings, guide: renderGuide })[st.tab]();
     window.scrollTo(0, 0);
   }
 
@@ -427,17 +580,18 @@
 
   main.addEventListener('input', e => {
     const t = e.target;
+    if (t.dataset && t.dataset.num && !t.closest('table.edit-table') && !t.closest('.set-table')) { liveFormat(t); return; }
     const table = t.closest('table.edit-table');
     if (table) {
       const tr = t.closest('tr[data-id]'); if (!tr) return;
       const tab = table.dataset.tab, row = (st.data[tab] || []).find(r => String(r.id) === tr.dataset.id);
       if (!row) return;
-      row[t.dataset.k] = t.value; queueSave(tab, row);
+      row[t.dataset.k] = liveFormat(t); queueSave(tab, row);
       if (tab === 'Holdings') { const el = $('#investReport'); if (el) el.innerHTML = investReport(); }
       return;
     }
     const sTr = t.closest('table.set-table tr[data-k]');
-    if (sTr) { clearTimeout(timers['set' + sTr.dataset.k]); status('수정됨…'); timers['set' + sTr.dataset.k] = setTimeout(() => saveSettingValue(sTr.dataset.k, t.value).then(() => status('저장됨 ✓')).catch(err => { status('저장 실패'); alert(err.message); }), 700); }
+    if (sTr) { const rawSet = liveFormat(t); clearTimeout(timers['set' + sTr.dataset.k]); status('수정됨…'); timers['set' + sTr.dataset.k] = setTimeout(() => saveSettingValue(sTr.dataset.k, rawSet).then(() => status('저장됨 ✓')).catch(err => { status('저장 실패'); alert(err.message); }), 700); }
   });
 
   main.addEventListener('click', async e => {
@@ -478,6 +632,14 @@
       if (!(bc.avgVar > 0)) return;
       try { await saveSettingValue('variable_override', Math.round(bc.avgVar), '가계부 최근 평균 변동지출'); status('저장됨 ✓'); alert('시뮬레이션의 변동 생활비를 ' + Math.round(bc.avgVar) + '만원/월로 바꿨습니다.'); } catch (err) { alert(err.message); }
       return;
+    }
+    if ((b = t.closest('[data-scn-sub]'))) { scnState().sub = b.dataset.scnSub; renderScn(); return; }
+    if ((b = t.closest('[data-apply]'))) { if (confirm('이 시나리오를 홈·추천의 기본 계획으로 반영할까요? (설정에 저장됩니다)')) applyScenario(b.dataset.apply); return; }
+    if (t.closest('#scnCalc')) {
+      const sc = scnState();
+      if (sc.sub === 'plan') { sc.pct = Math.max(0, Math.min(100, readNum('scPct'))); sc.rate = readNum('scRate'); sc.term = Math.max(1, readNum('scTerm')); const to = ($('#scTo').value || '').trim(); if (/^\d{4}-\d{2}$/.test(to)) sc.toYm = to; }
+      else { sc.target = readNum('sTarget'); sc.deposit = readNum('sDep'); sc.rent = readNum('sRent'); sc.rentDep = readNum('sRentDep'); sc.sellYm = ($('#sYm').value || '').trim(); }
+      renderScn(); return;
     }
     if (t.closest('#copyInvite')) {
       const inp = $('#inviteLink'); inp.select();

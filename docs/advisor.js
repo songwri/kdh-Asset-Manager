@@ -272,7 +272,96 @@
     return { cards, holdings: hr, allocNow, allocSteady, nowSurplus, steadySurplus, liquidityRisk, minCash, minYm: sim.ym[minT] };
   }
 
-  const api = { fm, pct, holdingsReport, prepayEffect, monthStats, ledgerMonths, budgetCap, allocate, advise, isFixedCat, curIdx };
+
+  /* ---------- 이벤트의 순자산 영향 ---------- */
+  // 집 납부·전세 반환·차량은 현금이 자산으로 바뀌는 것이라 순자산에 영향이 없고, 세금·수수료·이사·인테리어는 비용
+  const NW_NEUTRAL = ['house_pay', 'lease_return', 'car'];
+  const eventNwEffect = e => (NW_NEUTRAL.indexOf(String(e.category)) >= 0 ? 0 : num(e.amount, 0));
+
+  /* ---------- 자금 계획 (시작 현금 → 끝 현금) ---------- */
+  function fundingPlan(data, over, toYm) {
+    const sim = E.simulate(data, Object.assign({ sweep_pct: 0 }, over));
+    const t1 = Math.max(0, sim.ym.indexOf(toYm));
+    const sum = fn => { let x = 0; for (let t = 0; t <= t1; t++) x += fn(t); return x; };
+    const cat = (...cs) => sum(t => cs.reduce((q, c) => q + (sim.evCat[t][c] || 0), 0));
+    const known = ['lease_return', 'house_pay', 'tax', 'fee', 'move', 'interior', 'car'];
+    const rows = [
+      { k: 'start', label: '시작 현금', val: sim.open.cash, strong: true },
+      { label: '월급·수입 합계', val: sum(t => sim.income[t]) },
+      { label: '생활비·고정지출 합계', val: -sum(t => sim.expFixed[t] + sim.expVar[t]) },
+      { label: '대출·할부 상환', val: -sum(t => sim.debtPay[t]) },
+      { label: '대출 실행(주담대 등)', val: sum(t => sim.disb[t]) },
+      { label: '전세보증금 반환', val: cat('lease_return') },
+      { label: '집 계약금·중도금·잔금', val: cat('house_pay') },
+      { label: '취득세·중개보수·등기', val: cat('tax', 'fee') },
+      { label: '이사·임시거주·인테리어', val: cat('move', 'interior') },
+      { label: '자동차(테슬라) 순지출', val: cat('car') },
+      { label: '기타 이벤트', val: sum(t => Object.keys(sim.evCat[t]).filter(c => known.indexOf(c) < 0).reduce((q, c) => q + sim.evCat[t][c], 0)) },
+      { label: '예금 이자(세후)', val: sum(t => sim.interest[t]) },
+      { label: '투자·비상금에서 인출', val: sum(t => sim.drawn[t]) },
+    ];
+    let minLow = Infinity, minT = 0;
+    for (let t = 0; t < Math.min(sim.N, 24); t++) if (sim.low[t] < minLow) { minLow = sim.low[t]; minT = t; }
+    return {
+      sim, t1, rows, end: sim.cash[t1], reserve: sim.reserve[t1], invest: sim.invest[t1], nw: sim.networth[t1],
+      minLow, minYm: sim.ym[minT], payAfter: sim.debtPay[Math.min(sim.N - 1, t1 + 1)], toYm,
+    };
+  }
+
+  /* ---------- 집 매도 시점 분석 ---------- */
+  function evalSale(sim, idx) {
+    const S = sim.S, t = idx - sim.start;
+    const price = sim.house[Math.max(0, t - 1)];
+    const x = E.sellTax(S, price, idx);
+    const repay = sim.debt[t];
+    const net = price - x.fee - x.tax - repay;
+    const cost = S.house_price + S.house_basis_extra + S.house_capex;
+    const years = Math.max(0.1, x.holdY);
+    const annual = Math.pow(Math.max(0.01, (price - x.fee - x.tax) / cost), 1 / years) - 1;
+    return Object.assign({ idx, t, ym: E.ymOf(idx), age: sim.ageMe[t], repay, net, annual }, x);
+  }
+  function sellAnalysis(data, over) {
+    const sim = E.simulate(data, Object.assign({ years: 50, sell_ym: '' }, over));
+    const S = sim.S;
+    const pIdx = E.idxOf(S.house_purchase_ym), mi = E.idxOf(S.move_in_ym);
+    const earliest = Math.max(sim.start + 1, (mi == null ? pIdx : mi) + 24);
+    const last = sim.start + sim.N - 1;
+    let hit = null, best = null;
+    const monthly = [];
+    for (let idx = earliest; idx <= last; idx++) {
+      const r = evalSale(sim, idx);
+      monthly.push(r);
+      if (!hit && r.price >= S.house_target) hit = r;
+      if (!best || r.annual > best.annual) best = r;
+    }
+    const yearly = monthly.filter((r, i) => i % 12 === 0).filter(r => r.idx <= sim.start + 35 * 12);
+    return { sim, S, earliestIdx: earliest, earliestYm: E.ymOf(earliest), hit, best, yearly, monthly };
+  }
+  /** 매도 안 함 / 매도 후 전세 / 매도 후 월세 비교 */
+  function afterSaleCompare(data, over, saleYm) {
+    const modes = [['none', '매도 안 함'], ['jeonse', '매도 후 전세'], ['rent', '매도 후 월세']];
+    return modes.map(([m, label]) => {
+      const sim = E.simulate(data, Object.assign({ years: 50 }, over, m === 'none' ? { sell_ym: '' } : { sell_ym: saleYm, sell_mode: m }));
+      const t = sim.ym.indexOf(saleYm);
+      const avg = (a, b) => { let x = 0, n = 0; for (let k = Math.max(0, a); k <= Math.min(sim.N - 1, b); k++) { x += sim.income[k] - sim.expFixed[k] - sim.expVar[k] - sim.debtPay[k]; n++; } return n ? x / n : 0; };
+      const avgInc = (a, b) => { let x = 0, n = 0; for (let k = Math.max(0, a); k <= Math.min(sim.N - 1, b); k++) { x += sim.income[k]; n++; } return n ? x / n : 0; };
+      const avgExp = (a, b) => { let x = 0, n = 0; for (let k = Math.max(0, a); k <= Math.min(sim.N - 1, b); k++) { x += sim.expFixed[k] + sim.expVar[k] + sim.debtPay[k]; n++; } return n ? x / n : 0; };
+      let depleteAge = null;
+      for (let k = 0; k < sim.N; k++) if (sim.short[k] > 0.5) { depleteAge = sim.ageMe[k]; break; }
+      let t65 = sim.N - 1;
+      for (let k = 0; k < sim.N; k++) if (sim.ageMe[k] >= 65) { t65 = k; break; }
+      const t12 = Math.min(sim.N - 1, t + 12);
+      return {
+        mode: m, label, sale: sim.sale, depleteAge, sim,
+        incBefore: avgInc(t - 12, t - 1), expBefore: avgExp(t - 12, t - 1), surBefore: avg(t - 12, t - 1),
+        incAfter: avgInc(t + 1, t + 12), expAfter: avgExp(t + 1, t + 12), surAfter: avg(t + 1, t + 12),
+        investAfter: sim.invest[Math.min(sim.N - 1, t + 1)], cashAfter: sim.cash[Math.min(sim.N - 1, t + 1)],
+        nw1: sim.networth[t12], nw65: sim.networth[t65], fin65: sim.cash[t65] + sim.reserve[t65] + sim.invest[t65] - sim.debt[t65],
+      };
+    });
+  }
+
+  const api = { eventNwEffect, fundingPlan, sellAnalysis, afterSaleCompare, fm, pct, holdingsReport, prepayEffect, monthStats, ledgerMonths, budgetCap, allocate, advise, isFixedCat, curIdx };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   g.Advisor = api;
 })(typeof window !== 'undefined' ? window : globalThis);

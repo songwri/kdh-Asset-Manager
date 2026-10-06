@@ -10,6 +10,9 @@
     buffer_months: 3, sweep_pct: 100, emergency_months: 6, save_rate_target: 20,
     liquidity_floor: 500, child_birth_year: 2022,
     house_purchase_ym: '2027-03', house_price: 102000, variable_override: 0,
+    house_target: 200000, move_in_ym: '2027-04', sell_ym: '', sell_mode: 'jeonse', sell_fee_pct: 0.77,
+    house_basis_extra: 4101, house_capex: 700, after_deposit: 60000, after_rent: 150, after_rent_deposit: 5000,
+    tesla: 'buy', tesla_fin_pct: 0, tesla_rate: 6, tesla_term: 60,
   };
 
   const num = (v, d) => (v === '' || v == null || isNaN(Number(v)) ? d : Number(v));
@@ -104,6 +107,32 @@
   }
   const payment = (P, r, n) => (r === 0 ? P / n : P * r / (1 - Math.pow(1 + r, -n)));
 
+  /** 1세대 1주택 양도세 개략 추정 (만원). 실제 세액은 세무사 확인 필요 */
+  const BRACKETS = [[1400, 0.06, 0], [5000, 0.15, 126], [8800, 0.24, 576], [15000, 0.35, 1544], [30000, 0.38, 1994], [50000, 0.40, 2594], [100000, 0.42, 3594], [Infinity, 0.45, 6594]];
+  function sellTax(S, price, saleIdx) {
+    const pIdx = idxOf(S.house_purchase_ym);
+    const mi = idxOf(S.move_in_ym);
+    const mIdx = mi == null ? pIdx : mi;
+    const holdY = (saleIdx - pIdx) / 12, residY = (saleIdx - mIdx) / 12;
+    const fee = price * S.sell_fee_pct / 100;
+    const basis = S.house_price + S.house_basis_extra + S.house_capex;
+    const gain = Math.max(0, price - basis - fee);
+    let taxable = gain, ltRate = 0, exempt = false;
+    if (holdY >= 2 && residY >= 2) {
+      exempt = true;
+      taxable = price > 120000 ? gain * (price - 120000) / price : 0;
+      const hr = holdY >= 3 ? Math.min(0.4, 0.04 * Math.floor(holdY)) : 0;
+      const rr = Math.min(0.4, 0.04 * Math.floor(residY));
+      ltRate = hr + rr;
+      taxable *= 1 - ltRate;
+    }
+    const base = Math.max(0, taxable - 250);
+    let tax = 0;
+    for (let i = 0; i < BRACKETS.length; i++) if (base <= BRACKETS[i][0]) { tax = base * BRACKETS[i][1] - BRACKETS[i][2]; break; }
+    tax = Math.max(0, tax) * 1.1;
+    return { price, fee, basis, gain, holdY, residY, exempt, ltRate, taxable, tax };
+  }
+
   function simulate(data, over) {
     const S = settings(data, over);
     const N = Math.round(S.years * 12);
@@ -122,7 +151,7 @@
       else if (c === 'emergency') reserve += v;
       else if (c === 'lease') lease += v;
       else if (c === 'prepaid') prepaid += v;
-      else if (c === 'car') car += v;
+      else if (c === 'car') { if (S.tesla !== 'skip') car += v; }
       else if (c === 'real_estate') re += v;
       else if (['invest', 'isa', 'irp', 'pension', 'stock', 'fund'].indexOf(c) >= 0) invest += v;
       else other += v;
@@ -132,7 +161,7 @@
     });
 
     // 부채
-    const debts = (data.Debts || []).filter(d => isActive(d.active)).map(d => {
+    const debts = (data.Debts || []).filter(d => isActive(d.active) && !(S.tesla === 'skip' && /테슬라/.test(String(d.name)))).map(d => {
       const P = num(d.principal, 0), r = num(d.rate, 0) / 1200, n = Math.max(1, num(d.term, 1));
       const s = idxOf(d.start);
       const disburse = isY(d.disburse);
@@ -148,6 +177,7 @@
     const evByIdx = {};
     (data.Events || []).forEach(e => {
       if (!isActive(e.active)) return;
+      if (S.tesla === 'skip' && String(e.category) === 'car') return;
       const i = idxOf(e.date);
       if (i == null) return;
       (evByIdx[i] = evByIdx[i] || []).push(e);
@@ -156,6 +186,19 @@
 
     const purchaseIdx = idxOf(S.house_purchase_ym);
     let house = 0;
+    const sellIdx = idxOf(S.sell_ym);
+    let sold = false, saleInfo = null;
+    if (S.tesla === 'buy' && S.tesla_fin_pct > 0) {
+      let amt = 0, when = null;
+      (data.Events || []).forEach(e => {
+        if (isActive(e.active) && String(e.category) === 'car' && num(e.amount, 0) < 0 && /잔금/.test(String(e.name))) { amt += -num(e.amount, 0); when = idxOf(e.date); }
+      });
+      const P = amt * S.tesla_fin_pct / 100;
+      if (P > 0 && when != null) {
+        const r = S.tesla_rate / 1200, n = Math.max(1, S.tesla_term);
+        debts.push({ name: '테슬라 할부(가정)', P, r, n, s: when, disburse: true, bal: 0, pmt: payment(P, r, n) });
+      }
+    }
 
     const varRows = (data.Expenses || []).filter(r => isActive(r.active) && isY(r.variable) && String(r.kind || 'monthly') === 'monthly');
     const varBase = varRows.reduce((s, r) => s + num(r.amount, 0), 0);
@@ -165,7 +208,8 @@
     const out = {
       S, start, N, ym: [], t: [], ageMe: [], cash: [], reserve: [], invest: [], house: [], re: [], lease: [], prepaid: [], other: [], car: [],
       debt: [], networth: [], income: [], expFixed: [], expVar: [], debtPay: [], events: [], short: [], drawn: [],
-      houseRates: hRates, low: [],
+      houseRates: hRates, low: [], evCat: [], disb: [], interest: [], sweep: [], sale: null,
+      open: { cash, reserve, invest, lease, prepaid, car, other, re },
     };
 
     for (let t = 0; t < N; t++) {
@@ -176,14 +220,16 @@
       (data.Income || []).forEach(r => { inc += incomeAt(r, idx, S, t); });
       let expF = 0, expV = 0;
       (data.Expenses || []).forEach(r => {
+        if (sold && String(r.category) === '세금') return;
         const a = expenseAt(r, idx, S, t, varScale);
         if (isY(r.variable)) expV += a; else expF += a;
       });
+      if (sold && S.sell_mode === 'rent') expF += S.after_rent * Math.pow(1 + S.inflation / 100, t / 12);
 
       let dpay = 0, disb = 0, debtBal = 0;
       debts.forEach(d => {
         if (d.disburse && idx === d.s) { d.bal = d.P; disb += d.P; }
-        if (idx >= d.s + 1 && idx <= d.s + d.n && d.bal > 1e-9) {
+        if (!d.closed && idx >= d.s + 1 && idx <= d.s + d.n && d.bal > 1e-9) {
           const interest = d.bal * d.r;
           const princ = d.r === 0 ? d.P / d.n : Math.min(d.bal, d.pmt - interest);
           d.bal -= princ;
@@ -193,9 +239,10 @@
       });
 
       let ev = 0;
+      const evc = {};
       (evByIdx[idx] || []).forEach(e => {
         const a = num(e.amount, 0), c = String(e.category || '');
-        ev += a;
+        ev += a; evc[c || 'other'] = (evc[c || 'other'] || 0) + a;
         if (c === 'lease_return') lease = Math.max(0, lease - a);
         if (c === 'house_pay' && a < 0) prepaid += -a;
         if (c === 'car') car = Math.max(0, car - a);
@@ -204,18 +251,31 @@
         house = S.house_price; prepaid = 0;
       }
 
-      const lowCash = prevCash + Math.min(0, ev + disb) - 0.5 * (expF + expV + dpay);
-      cash += inc - expF - expV - dpay + ev + disb;
+      let saleCash = 0;
+      if (sellIdx != null && idx === sellIdx && house > 0 && !sold) {
+        const x = sellTax(S, house, idx);
+        let repay = 0;
+        debts.forEach(d => { if (d.disburse && d.bal > 0) { repay += d.bal; d.bal = 0; d.closed = true; } });
+        debtBal = debts.reduce((q, d) => q + d.bal, 0);
+        const dep = S.sell_mode === 'rent' ? S.after_rent_deposit : S.after_deposit;
+        saleCash = x.price - x.fee - x.tax - repay - dep;
+        lease += dep;
+        saleInfo = Object.assign({}, x, { t, ym: ymOf(idx), repay, deposit: dep, net: x.price - x.fee - x.tax - repay, mode: S.sell_mode });
+        house = 0; sold = true;
+      }
 
-      if (cash > 0) cash += cash * cm;
-      reserve += reserve * cm;
+      const lowCash = prevCash + Math.min(0, ev + disb) - 0.5 * (expF + expV + dpay);
+      cash += inc - expF - expV - dpay + ev + disb + saleCash;
+
+      const ci = cash > 0 ? cash * cm : 0, ri = reserve * cm;
+      cash += ci; reserve += ri;
       invest *= 1 + rm;
       const hf = Math.pow(1 + hRates[Math.floor(t / 12)], 1 / 12);
       house *= hf;
       re *= hf;
       car *= Math.pow(0.88, 1 / 12);
 
-      let drawn = 0, short = 0;
+      let drawn = 0, short = 0, moved = 0;
       if (cash < 0) {
         let need = -cash;
         const fromInv = Math.min(invest, need); invest -= fromInv; need -= fromInv; drawn += fromInv;
@@ -228,7 +288,7 @@
         const keep = S.buffer_months * (expF + expV + dpay) + Math.max(0, -fut);
         if (cash > keep) {
           const mv = (cash - keep) * S.sweep_pct / 100;
-          cash -= mv; invest += mv;
+          cash -= mv; invest += mv; moved = mv;
         }
       }
 
@@ -241,7 +301,9 @@
       out.networth.push(cash + reserve + invest + house + re + lease + prepaid + other + car - debtBal);
       out.income.push(inc); out.expFixed.push(expF); out.expVar.push(expV); out.debtPay.push(dpay);
       out.events.push(ev); out.short.push(short); out.drawn.push(drawn);
+      out.evCat.push(evc); out.disb.push(disb); out.interest.push(ci); out.sweep.push(moved);
     }
+    out.sale = saleInfo;
     return out;
   }
 
@@ -263,7 +325,7 @@
     };
   }
 
-  const api = { DEFAULTS, settings, simulate, scenarioMetrics, houseRates, payment, amortBalance, num, isY, isActive, idxOf, ymOf, hits, incomeAt, expenseAt };
+  const api = { DEFAULTS, settings, simulate, sellTax, scenarioMetrics, houseRates, payment, amortBalance, num, isY, isActive, idxOf, ymOf, hits, incomeAt, expenseAt };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   g.Engine = api;
 })(typeof window !== 'undefined' ? window : globalThis);
