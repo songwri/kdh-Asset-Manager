@@ -18,13 +18,17 @@ const TABS = {
   Income:   ['id', 'name', 'owner', 'amount', 'kind', 'months', 'start', 'end', 'grow', 'retire_stop', 'pause_from', 'pause_to', 'note', 'active'],
   Expenses: ['id', 'name', 'category', 'amount', 'kind', 'months', 'start', 'end', 'inflate', 'variable', 'note', 'active'],
   Assets:   ['id', 'name', 'category', 'owner', 'value', 'rate', 'liquid', 'note', 'active'],
-  Holdings: ['id', 'account', 'owner', 'name', 'sector', 'qty', 'avg_price', 'price', 'thesis', 'note', 'active'],
+  Holdings: ['id', 'account', 'owner', 'name', 'sector', 'qty', 'avg_price', 'price', 'thesis', 'note', 'active', 'symbol', 'price_at'],
   Debts:    ['id', 'name', 'principal', 'rate', 'term', 'start', 'disburse', 'note', 'active'],
   Events:   ['id', 'date', 'name', 'amount', 'category', 'certain', 'note', 'active'],
   Ledger:   ['id', 'date', 'type', 'amount', 'category', 'who', 'pay', 'memo'],
 };
 const NUM_COLS = ['amount', 'value', 'rate', 'qty', 'avg_price', 'price', 'principal', 'term'];
 const MONTH_COLS = ['start', 'end', 'pause_from', 'pause_to'];
+const SCHEMA_VERSION = 2;
+const QUOTES_TAB = 'Quotes';
+const LOG_TAB = 'Log';
+const MIN_MANUAL_INTERVAL_MS = 5 * 60 * 1000;
 const FAIL_LIMIT = 5;
 const LOCK_SECONDS = 900;
 const TOKEN_SECONDS = 6 * 3600;
@@ -41,6 +45,10 @@ function onOpen() {
     .addItem('① 시트 초기화(탭 생성)', 'initSheets')
     .addItem('② 보안코드 설정', 'promptPin')
     .addItem('③ 초기 데이터 입력 (Seed.gs 필요)', 'runSeed')
+    .addSeparator()
+    .addItem('④ 시세 자동 갱신 켜기 (1시간마다)', 'enableAutoRefresh')
+    .addItem('⑤ 시세 지금 갱신', 'refreshNow')
+    .addItem('⑥ 시세 자동 갱신 끄기', 'disableAutoRefresh')
     .addToUi();
 }
 
@@ -144,7 +152,8 @@ function route_(req) {
   if (req.action === 'login') return { ok: true, token: checkPin_(req.pin) };
   requireToken_(req.token);
   switch (req.action) {
-    case 'all':   return { ok: true, data: readAll_() };
+    case 'all':   ensureSchema_(); return { ok: true, data: readAll_(), meta: meta_() };
+    case 'refresh': { const r = refreshPrices_({ manual: true }); return { ok: true, result: r, holdings: readTab_('Holdings'), meta: meta_() }; }
     case 'save':  return { ok: true, id: saveRow_(req.tab, req.row) };
     case 'del':   deleteRow_(req.tab, req.id); return { ok: true };
     case 'logout': CacheService.getScriptCache().remove('tok_' + req.token); return { ok: true };
@@ -243,4 +252,182 @@ function deleteRow_(tab, id) {
 /** Seed.gs 등에서 사용: 여러 행을 한 번에 추가 (이미 같은 id가 있으면 덮어씀) */
 function appendRows_(tab, rows) {
   rows.forEach(function (r) { saveRow_(tab, r); });
+}
+
+
+/* ---------- 스키마 자동 보정 (열 추가) ---------- */
+
+function ensureSchema_() {
+  const cache = CacheService.getScriptCache();
+  const key = 'schema_v' + SCHEMA_VERSION;
+  if (cache.get(key)) return;
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  Object.keys(TABS).forEach(function (name) {
+    const sh = ss.getSheetByName(name);
+    if (!sh) return;
+    const h = TABS[name];
+    const cur = sh.getRange(1, 1, 1, h.length).getValues()[0];
+    if (cur.join('|') !== h.join('|')) {
+      sh.getRange(1, 1, 1, h.length).setValues([h]).setFontWeight('bold').setBackground('#eef2f7');
+      h.forEach(function (c, i) {
+        if (!isNumCol_(name, c) && !(name === 'Settings' && c === 'value')) sh.getRange(2, i + 1, Math.max(sh.getMaxRows() - 1, 1), 1).setNumberFormat('@');
+      });
+    }
+  });
+  cache.put(key, '1', 21600);
+}
+
+/* ---------- 시세 자동 갱신 (GOOGLEFINANCE) ---------- */
+// 시트의 GOOGLEFINANCE 함수로 현재가를 읽어 Holdings.price 에 저장한다.
+// 안정성: 동시 실행 잠금 / 재시도 / 이상값(±35% 초과) 거부 후 이전 값 유지 / 실행 로그 / 3회 연속 실패 시 오류 발생(구글 실패 알림)
+
+function quotesSheet_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let q = ss.getSheetByName(QUOTES_TAB);
+  if (!q) {
+    q = ss.insertSheet(QUOTES_TAB);
+    q.getRange(1, 1, 1, 2).setValues([['symbol', 'price (GOOGLEFINANCE)']]).setFontWeight('bold');
+  }
+  return q;
+}
+
+function stamp_(d) {
+  return Utilities.formatDate(d, 'Asia/Seoul', "yyyy-MM-dd'T'HH:mm:ssXXX");
+}
+
+function log_(kind, ok, updated, msg) {
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    let sh = ss.getSheetByName(LOG_TAB);
+    if (!sh) {
+      sh = ss.insertSheet(LOG_TAB);
+      sh.getRange(1, 1, 1, 5).setValues([['time', 'kind', 'result', 'updated', 'message']]).setFontWeight('bold');
+    }
+    sh.appendRow([stamp_(new Date()), kind, ok ? 'OK' : 'FAIL', updated, String(msg || '')]);
+    if (sh.getLastRow() > 400) sh.deleteRows(2, 100);
+  } catch (e) { /* 로그 실패는 무시 */ }
+}
+
+function refreshPrices_(opts) {
+  opts = opts || {};
+  const props = PropertiesService.getScriptProperties();
+  const now = new Date();
+  const lastRun = Number(props.getProperty('REFRESH_LAST_RUN') || 0);
+  if (opts.manual && now.getTime() - lastRun < MIN_MANUAL_INTERVAL_MS) {
+    return { skipped: true, updated: 0, warnings: [], failed: [], message: '방금 갱신했습니다. 5분 뒤에 다시 시도하세요.' };
+  }
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(20000)) throw new Error('다른 저장 작업 중입니다. 잠시 후 다시 시도하세요.');
+  const result = { skipped: false, updated: 0, warnings: [], failed: [], message: '' };
+  try {
+    ensureSchema_();
+    const sh = sheet_('Holdings');
+    const H = TABS.Holdings;
+    const col = function (k) { return H.indexOf(k); };
+    const last = sh.getLastRow();
+    const targets = [];
+    if (last >= 2) {
+      sh.getRange(2, 1, last - 1, H.length).getValues().forEach(function (r, i) {
+        const sym = String(r[col('symbol')] || '').trim();
+        const act = !/^(n|no|false|0)$/i.test(String(r[col('active')] || '').trim());
+        if (r[0] && sym && act) targets.push({ row: i + 2, symbol: sym, prev: Number(r[col('price')]) || 0, name: r[col('name')] });
+      });
+    }
+    if (!targets.length) {
+      result.message = '시세 코드가 입력된 종목이 없습니다.';
+      props.setProperty('REFRESH_LAST_RUN', String(now.getTime()));
+      return result;
+    }
+    const syms = Array.from(new Set(targets.map(function (t) { return t.symbol; })));
+    const q = quotesSheet_();
+    q.getRange(2, 1, Math.max(q.getMaxRows() - 1, 1), 2).clearContent();
+    q.getRange(2, 1, syms.length, 1).setValues(syms.map(function (x) { return [x]; }));
+    q.getRange(2, 2, syms.length, 1).setFormulas(syms.map(function (x, i) { return ['=GOOGLEFINANCE(A' + (i + 2) + ',"price")']; }));
+    SpreadsheetApp.flush();
+
+    let prices = {};
+    for (let attempt = 1; attempt <= 4; attempt++) {
+      Utilities.sleep(2000 * attempt);
+      const out = q.getRange(2, 2, syms.length, 1).getValues();
+      prices = {};
+      let pending = 0;
+      syms.forEach(function (x, i) {
+        const v = out[i][0];
+        if (typeof v === 'number' && v > 0) prices[x] = v; else pending++;
+      });
+      if (!pending) break;
+    }
+
+    const at = stamp_(now);
+    targets.forEach(function (t) {
+      const p = prices[t.symbol];
+      if (!(p > 0)) { result.failed.push(t.name + ' (' + t.symbol + ')'); return; }
+      if (t.prev > 0 && (p / t.prev < 0.65 || p / t.prev > 1.35)) {
+        result.warnings.push(t.name + ': 시세 ' + p + '가 기존 ' + t.prev + '와 35% 넘게 달라 반영하지 않음 (코드/통화 확인)');
+        return;
+      }
+      sh.getRange(t.row, col('price') + 1).setValue(p);
+      sh.getRange(t.row, col('price_at') + 1).setValue(at);
+      result.updated++;
+    });
+
+    props.setProperty('REFRESH_LAST_RUN', String(now.getTime()));
+    const problems = result.failed.map(function (x) { return '조회 실패: ' + x; }).concat(result.warnings);
+    if (result.updated > 0) props.setProperty('REFRESH_LAST_OK', at);
+    props.setProperty('REFRESH_LAST_ERR', problems.join(' / '));
+    result.message = '갱신 ' + result.updated + '건' + (problems.length ? ', 문제 ' + problems.length + '건' : '');
+    log_(opts.auto ? 'auto' : 'manual', problems.length === 0, result.updated, problems.join(' / '));
+    return result;
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/** 1시간마다 실행되는 트리거 함수 */
+function autoRefresh() {
+  const props = PropertiesService.getScriptProperties();
+  try {
+    const r = refreshPrices_({ auto: true });
+    if (r.updated === 0 && r.failed.length > 0) throw new Error(r.message + ' ' + r.failed.join(', '));
+    props.setProperty('REFRESH_FAILS', '0');
+  } catch (e) {
+    const n = Number(props.getProperty('REFRESH_FAILS') || 0) + 1;
+    props.setProperty('REFRESH_FAILS', String(n));
+    props.setProperty('REFRESH_LAST_ERR', String(e.message || e));
+    log_('auto', false, 0, String(e.message || e));
+    if (n >= 3) throw e; // 3회 연속 실패 시 실행 실패로 남겨 구글 알림을 받을 수 있게 함
+  }
+}
+
+function disableAutoRefresh_() {
+  ScriptApp.getProjectTriggers().forEach(function (t) {
+    if (t.getHandlerFunction() === 'autoRefresh') ScriptApp.deleteTrigger(t);
+  });
+}
+
+function enableAutoRefresh() {
+  disableAutoRefresh_();
+  ScriptApp.newTrigger('autoRefresh').timeBased().everyHours(1).create();
+  PropertiesService.getScriptProperties().setProperty('REFRESH_FAILS', '0');
+  try { SpreadsheetApp.getUi().alert('시세 자동 갱신을 켰습니다 (1시간마다).\n\n실패 알림: Apps Script 왼쪽 [트리거] > autoRefresh 편집 > 실패 알림 설정에서 "즉시 알림"을 고르면 메일로 받을 수 있습니다.'); } catch (e) { /* ignore */ }
+}
+
+function disableAutoRefresh() {
+  disableAutoRefresh_();
+  try { SpreadsheetApp.getUi().alert('시세 자동 갱신을 껐습니다.'); } catch (e) { /* ignore */ }
+}
+
+function refreshNow() {
+  const r = refreshPrices_({ manual: false });
+  const lines = [r.message || ''].concat(r.failed.map(function (x) { return '조회 실패: ' + x; }), r.warnings);
+  try { SpreadsheetApp.getUi().alert(lines.filter(Boolean).join('\n') || '완료'); } catch (e) { /* ignore */ }
+}
+
+function meta_() {
+  const p = PropertiesService.getScriptProperties();
+  let auto = false;
+  try {
+    auto = ScriptApp.getProjectTriggers().some(function (t) { return t.getHandlerFunction() === 'autoRefresh'; });
+  } catch (e) { /* 권한 없으면 false */ }
+  return { pricesAt: p.getProperty('REFRESH_LAST_OK') || '', lastErr: p.getProperty('REFRESH_LAST_ERR') || '', fails: Number(p.getProperty('REFRESH_FAILS') || 0), auto: auto };
 }

@@ -16,7 +16,7 @@
     Income: [['name', '항목', 'text'], ['owner', '소유', 'select:me,wife,joint'], ['amount', '금액(만원)', 'num'], ['kind', '주기', 'select:monthly,yearly,once'], ['months', '월(연1회용)', 'text'], ['start', '시작', 'month'], ['end', '종료', 'month'], ['grow', '증가', 'select:,Y,I'], ['retire_stop', '은퇴시 중단', 'select:N,Y'], ['pause_from', '휴직 시작', 'month'], ['pause_to', '휴직 끝', 'month'], ['note', '메모', 'text'], ['active', '사용', 'select:Y,N']],
     Expenses: [['name', '항목', 'text'], ['category', '분류', 'text'], ['amount', '금액(만원)', 'num'], ['kind', '주기', 'select:monthly,yearly,once'], ['months', '월(연1회용)', 'text'], ['start', '시작', 'month'], ['end', '종료', 'month'], ['inflate', '물가반영', 'select:Y,N'], ['variable', '변동기준', 'select:N,Y'], ['note', '메모', 'text'], ['active', '사용', 'select:Y,N']],
     Assets: [['name', '항목', 'text'], ['category', '분류', 'select:cash,deposit,emergency,irp,isa,invest,lease,prepaid,car,real_estate,other'], ['owner', '소유', 'select:me,wife,joint'], ['value', '금액(만원)', 'num'], ['rate', '금리%', 'num'], ['liquid', '바로사용', 'select:Y,N'], ['note', '메모', 'text'], ['active', '사용', 'select:Y,N']],
-    Holdings: [['account', '계좌', 'select:일반,ISA,IRP,연금저축,기타'], ['owner', '소유', 'select:me,wife,joint'], ['name', '종목', 'text'], ['sector', '섹터', 'text'], ['qty', '수량', 'num'], ['avg_price', '매입단가(원)', 'num'], ['price', '현재가(원)', 'num'], ['thesis', '보유 사유(논지)', 'text'], ['active', '사용', 'select:Y,N']],
+    Holdings: [['account', '계좌', 'select:일반,ISA,IRP,연금저축,기타'], ['owner', '소유', 'select:me,wife,joint'], ['name', '종목', 'text'], ['sector', '섹터', 'text'], ['qty', '수량', 'num'], ['avg_price', '매입단가(원)', 'num'], ['price', '현재가(원)', 'num'], ['symbol', '시세 코드', 'text'], ['thesis', '보유 사유(논지)', 'text'], ['active', '사용', 'select:Y,N']],
     Debts: [['name', '항목', 'text'], ['principal', '원금(만원)', 'num'], ['rate', '금리%', 'num'], ['term', '기간(개월)', 'num'], ['start', '실행월', 'month'], ['disburse', '현금유입', 'select:Y,N'], ['note', '메모', 'text'], ['active', '사용', 'select:Y,N']],
     Events: [['date', '월', 'month'], ['name', '항목', 'text'], ['amount', '금액(만원, 지출은 −)', 'num'], ['category', '분류', 'select:house_pay,lease_return,tax,fee,move,interior,car,other'], ['certain', '확정', 'select:Y,N'], ['note', '메모', 'text'], ['active', '사용', 'select:Y,N']],
   };
@@ -102,7 +102,7 @@
   async function loadAll() {
     status('불러오는 중…');
     const r = await api('all');
-    st.data = r.data; st.dirty = true;
+    st.data = r.data; st.meta = r.meta || {}; st.loadedAt = Date.now(); st.dirty = true;
     $('#login').classList.add('hidden'); $('#app').classList.remove('hidden');
     status(''); renderTabs(); render();
   }
@@ -337,15 +337,34 @@
   /* ---------- 투자 ---------- */
   function investReport() {
     const hr = A.holdingsReport(st.data);
-    return '<div class="tbl-wrap"><table><thead><tr><th>종목</th><th>계좌</th><th class="r">매입금</th><th class="r">평가금</th><th class="r">손익</th><th class="r">수익률</th><th class="r">비중</th><th>점검</th></tr></thead><tbody>' +
-      hr.rows.map(r => '<tr><td>' + esc(r.name) + '</td><td>' + esc(r.account) + '</td><td class="r">' + fm(r.cost) + '</td><td class="r">' + fm(r.value) + '</td><td class="r">' + signed(r.loss) + '</td><td class="r ' + (r.pnl < 0 ? 'neg' : 'pos') + '">' + pct(r.pnl) + '</td><td class="r">' + pct(r.weight) + '</td><td class="small" style="white-space:normal">' + (r.flags.length ? r.flags.map(f => '<span class="badge">' + esc(f) + '</span>').join(' ') : '<span class="muted">—</span>') + '</td></tr>').join('') +
-      '<tr><th>합계</th><th></th><th class="r">' + fm(hr.totalCost) + '</th><th class="r">' + fm(hr.total) + '</th><th class="r">' + signed(hr.total - hr.totalCost) + '</th><th class="r">' + pct(hr.pnl) + '</th><th></th><th></th></tr></tbody></table></div>' +
+    return '<div class="tbl-wrap"><table><thead><tr><th>종목</th><th>계좌</th><th class="r">매입금</th><th class="r">평가금</th><th class="r">손익</th><th class="r">수익률</th><th class="r">비중</th><th>시세 갱신</th><th>점검</th></tr></thead><tbody>' +
+      hr.rows.map(r => '<tr><td>' + esc(r.name) + '</td><td>' + esc(r.account) + '</td><td class="r">' + fm(r.cost) + '</td><td class="r">' + fm(r.value) + '</td><td class="r">' + signed(r.loss) + '</td><td class="r ' + (r.pnl < 0 ? 'neg' : 'pos') + '">' + pct(r.pnl) + '</td><td class="r">' + pct(r.weight) + '</td><td class="small muted">' + ago(r.price_at) + '</td><td class="small" style="white-space:normal">' + (r.flags.length ? r.flags.map(f => '<span class="badge">' + esc(f) + '</span>').join(' ') : '<span class="muted">—</span>') + '</td></tr>').join('') +
+      '<tr><th>합계</th><th></th><th class="r">' + fm(hr.totalCost) + '</th><th class="r">' + fm(hr.total) + '</th><th class="r">' + signed(hr.total - hr.totalCost) + '</th><th class="r">' + pct(hr.pnl) + '</th><th></th><th></th><th></th></tr></tbody></table></div>' +
       '<h3 style="margin-top:16px">섹터 비중</h3>' + hr.sectorList.map(s => '<div class="small" style="display:flex;justify-content:space-between"><span>' + esc(s.sector) + '</span><span>' + fm(s.value) + ' · ' + pct(s.weight) + '</span></div><div class="bar" style="margin-bottom:6px"><i style="width:' + (s.weight * 100) + '%;background:var(--s1)"></i></div>').join('');
   }
+  const ago = iso => {
+    if (!iso) return '—';
+    const m = Math.round((Date.now() - new Date(iso).getTime()) / 60000);
+    if (isNaN(m)) return '—';
+    return m < 1 ? '방금' : m < 60 ? m + '분 전' : m < 1440 ? Math.floor(m / 60) + '시간 전' : Math.floor(m / 1440) + '일 전';
+  };
+  const KNOWN_SYMBOLS = { '기아': 'KRX:000270', 'CJ CGV': 'KRX:079160', '스튜디오드래곤': 'KRX:253450', '레인보우로보틱스': 'KRX:277810', 'TIGER 미국S&P500': 'KRX:360750' };
+  function priceStatusHtml() {
+    const m = st.meta || {}, hs = (st.data.Holdings || []).filter(h => E.isActive(h.active));
+    const withSym = hs.filter(h => String(h.symbol || '').trim()).length;
+    const mins = m.pricesAt ? (Date.now() - new Date(m.pricesAt).getTime()) / 60000 : null;
+    const stale = withSym > 0 && (mins == null || mins > 180);
+    return '<div class="card"><div class="row-between"><h2>시세 자동 갱신</h2><span class="badge' + (stale || m.fails ? '' : ' plain') + '">' + (m.auto ? '자동 갱신 켜짐 · 1시간마다' : '자동 갱신 꺼짐') + '</span></div>' +
+      '<div class="small">시세 코드를 입력한 종목 ' + withSym + '/' + hs.length + '개 · 마지막 성공 <b>' + ago(m.pricesAt) + '</b>' + (stale ? ' <b class="neg">(오래됨 — 자동 갱신 상태를 확인하세요)</b>' : '') + '</div>' +
+      (m.lastErr ? '<div class="note warn" style="margin:8px 0"><div class="body">최근 문제: ' + esc(m.lastErr) + '</div></div>' : '') +
+      (!m.auto ? '<div class="small muted" style="margin-top:6px">자동 갱신을 켜려면 구글 시트 메뉴 [자산관리 > ④ 시세 자동 갱신 켜기]를 실행하세요.</div>' : '') +
+      '<div class="toolbar"><button class="primary" id="priceRefresh">지금 갱신</button><button id="fillSymbols">추천 시세 코드 채우기</button><span class="small muted" id="priceMsg"></span></div>' +
+      '<div class="legend-note">시세 코드는 구글 파이낸스 형식입니다 (예: 기아 <code>KRX:000270</code>). 코드를 입력한 종목의 현재가는 갱신될 때마다 덮어써집니다. 무료 시세는 약 20분 지연될 수 있습니다.</div></div>';
+  }
   function renderInvest() {
-    main.innerHTML = '<div class="card"><h2>보유 종목 입력</h2><div class="small muted">매입단가·현재가는 원 단위입니다. 보유 사유(논지)를 적어두면 점검 항목에서 사라집니다.</div>' + editTable('Holdings', st.data.Holdings || []) + '</div>' +
+    main.innerHTML = priceStatusHtml() + '<div class="card"><h2>보유 종목 입력</h2><div class="small muted">매입단가·현재가는 원 단위입니다. 보유 사유(논지)를 적어두면 점검 항목에서 사라집니다.</div>' + editTable('Holdings', st.data.Holdings || []) + '</div>' +
       '<div class="card"><h2>점검</h2><div id="investReport">' + investReport() + '</div>' +
-      '<div class="legend-note">손익은 입력한 현재가 기준입니다. 현재가 자동 갱신(GOOGLEFINANCE)은 다음 단계입니다.</div></div>';
+      '<div class="legend-note">손익은 입력한 현재가 기준입니다. 현재가는 시세 코드가 있으면 자동 갱신 값, 없으면 직접 입력한 값입니다.</div></div>';
   }
 
   /* ---------- 시뮬레이션 ---------- */
@@ -415,7 +434,7 @@
   function renderGuide() {
     main.innerHTML = '<div class="card"><h2>시장·경제 데이터 연결 가이드 (다음 단계)</h2>' +
       '<p>목표: 금리·환율·지수·물가를 시트에 매일 저장하고, 그 값으로 추천에 반영하기.</p>' +
-      '<details open><summary>1. 지금 바로 되는 것 — 구글시트 GOOGLEFINANCE</summary><p class="small">주가·지수·환율은 시트 함수로 무료 갱신됩니다. 예: <code>=GOOGLEFINANCE("KRX:000270","price")</code>, <code>=GOOGLEFINANCE("CURRENCY:USDKRW")</code>. 투자 탭의 현재가를 시트 수식으로 연결하는 작업을 다음에 해드립니다.</p></details>' +
+      '<details open><summary>1. 지금 바로 되는 것 — 구글시트 GOOGLEFINANCE</summary><p class="small">주가·지수·환율은 시트 함수로 무료 갱신됩니다. 예: <code>=GOOGLEFINANCE("KRX:000270","price")</code>, <code>=GOOGLEFINANCE("CURRENCY:USDKRW")</code>. 투자 탭의 "시세 코드"를 입력하면 1시간마다 자동으로 갱신됩니다 (시트 메뉴 ④로 켜기).</p></details>' +
       '<details><summary>2. 금리·물가 — 한국은행 ECOS, 미국 FRED (무료 API 키)</summary><p class="small">Apps Script의 UrlFetchApp로 하루 한 번 호출해 Market 탭에 저장합니다. 키는 Script Properties에만 보관해 사이트·git에 노출하지 않습니다.</p></details>' +
       '<details><summary>3. 뉴스·이슈 해석</summary><p class="small">자동 요약은 유료 LLM API가 필요합니다. 무료 대안: 주 1회 Market 탭 요약을 Claude에 붙여넣어 코멘트를 받고, 결론만 메모로 저장하세요. MCP 연결은 필수가 아닙니다(자동화를 원할 때 Google Drive/시트 커넥터를 검토).</p></details>' +
       '<details><summary>4. 이 사이트의 보안 구조</summary><p class="small">데이터는 구글 시트에만 있고, 이 페이지(코드)에는 개인정보가 없습니다. Apps Script는 보안코드를 확인한 뒤 6시간짜리 토큰을 주고, 토큰 없이는 데이터를 반환하지 않습니다. 웹 앱 URL과 보안코드는 가족 외에 공유하지 마세요.</p></details></div>';
@@ -641,6 +660,24 @@
       else { sc.target = readNum('sTarget'); sc.deposit = readNum('sDep'); sc.rent = readNum('sRent'); sc.rentDep = readNum('sRentDep'); sc.sellYm = ($('#sYm').value || '').trim(); }
       renderScn(); return;
     }
+    if (t.closest('#priceRefresh')) {
+      const btn = t.closest('#priceRefresh'); btn.disabled = true; $('#priceMsg').textContent = '갱신 중… (최대 20초)'; status('시세 갱신 중…');
+      try {
+        const r = await api('refresh');
+        if (r.holdings) { st.data.Holdings = r.holdings; st.meta = r.meta || {}; st.dirty = true; }
+        status(''); renderInvest();
+        const res = r.result || {};
+        $('#priceMsg').textContent = res.skipped ? res.message : (res.message || '완료') + ((res.failed || []).length ? ' · 조회 실패: ' + res.failed.join(', ') : '') + ((res.warnings || []).length ? ' · ' + res.warnings.join(' / ') : '');
+      } catch (err) { status(''); btn.disabled = false; $('#priceMsg').textContent = '실패: ' + err.message; }
+      return;
+    }
+    if (t.closest('#fillSymbols')) {
+      let n = 0;
+      (st.data.Holdings || []).forEach(h => { const k = String(h.name || '').trim(); if (!String(h.symbol || '').trim() && KNOWN_SYMBOLS[k]) { h.symbol = KNOWN_SYMBOLS[k]; queueSave('Holdings', h); n++; } });
+      st.dirty = true; renderInvest();
+      $('#priceMsg').textContent = n ? n + '개 종목에 코드를 채웠습니다. 코드가 맞는지 시트에서 =GOOGLEFINANCE("코드","price")로 한 번 확인하세요. 목록에 없는 종목은 직접 입력하세요.' : '채울 수 있는 종목이 없습니다. 종목명이 같을 때만 채웁니다.';
+      return;
+    }
     if (t.closest('#copyInvite')) {
       const inp = $('#inviteLink'); inp.select();
       let ok = false;
@@ -665,6 +702,17 @@
     if (e.target.id === 'lgMonth') { st.ledgerMonth = e.target.value; renderLedger(); }
   });
   window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { if (st.data) render(); });
+
+  /* ---------- 돌아왔을 때 조용히 새로고침 ---------- */
+  document.addEventListener('visibilitychange', async () => {
+    if (document.visibilityState !== 'visible' || !st.data || st.local || Date.now() - (st.loadedAt || 0) < 15 * 60 * 1000) return;
+    try {
+      const r = await api('all');
+      st.data = r.data; st.meta = r.meta || {}; st.loadedAt = Date.now(); st.dirty = true;
+      const typing = document.activeElement && /^(INPUT|SELECT|TEXTAREA)$/.test(document.activeElement.tagName);
+      if (!typing && ['dash', 'invest', 'advice', 'scn'].indexOf(st.tab) >= 0) { const y = window.scrollY; render(); window.scrollTo(0, y); }
+    } catch (e) { /* 다음 기회에 */ }
+  });
 
   /* ---------- 시작 ---------- */
   try {
