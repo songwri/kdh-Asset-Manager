@@ -395,21 +395,6 @@
   }
   const checksHtml = () => { const c = dataChecks(); return c.length ? '<div class="note risk"><div class="hd"><span class="badge">확인 필요</span><span>입력값 점검</span></div><ul>' + c.map(x => '<li>' + esc(x) + '</li>').join('') + '</ul><div class="toolbar">' + link('대출·할부 고치기', 'manage', 'debts') + '</div></div>' : ''; };
   /* ---------- 홈 ---------- */
-  function budgetCard(sim, cur) {
-    const led = st.data.Ledger || [];
-    const bc = A.budgetCap(st.data, sim, led, new Date());
-    const ms = A.monthStats(led, sim.ym[cur]);
-    const cap = bc.cur.cap, spent = ms.variable, remain = cap - spent, ratio = cap > 0 ? spent / cap : 0;
-    const now = new Date(), dim = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate(), daysLeft = Math.max(1, dim - now.getDate() + 1);
-    const lvl = ratio > 1 ? 'risk' : ratio > 0.8 ? 'warn' : '';
-    return '<section class="card"><div class="row-between"><h2>이번 달 생활비</h2><span class="small muted">상한 ' + fm(cap) + '</span></div>' +
-      (ms.count ? '<div class="big-num">' + fm(spent) + ' <span class="small muted">상한의 ' + Math.round(ratio * 100) + '%</span></div>' +
-        '<div class="bar ' + lvl + '" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="' + Math.min(100, Math.round(ratio * 100)) + '"><i style="width:' + Math.min(100, ratio * 100) + '%"></i></div>' +
-        '<p class="small">' + (remain >= 0 ? '남은 돈 <b>' + fm(remain) + '</b> · 하루 ' + fm(remain / daysLeft) + '씩 쓸 수 있어요' + (lvl === 'warn' ? ' (80% 넘음)' : '') : '<b class="neg">상한을 ' + fm(-remain) + ' 넘었어요</b>') + '</p>' :
-        '<p class="small muted">이번 달 입력한 지출이 아직 없습니다.</p>') +
-      (bc.cur.tighten > 0 ? '<p class="small muted">' + esc(bc.cur.tightenYm) + ' 큰 지출에 대비해 상한을 ' + fm(bc.cur.tighten) + ' 낮췄어요.</p>' : '') +
-      '<div class="toolbar"><button class="primary" data-tab="ledger">지출 입력</button></div></section>';
-  }
   function monthEvents(sim, k) {
     const ym = sim.ym[k], S = sim.S, parts = [];
     (st.data.Events || []).filter(e => E.isActive(e.active) && String(e.date) === ym && !(S.tesla === 'skip' && String(e.category) === 'car'))
@@ -432,32 +417,88 @@
     const msg = minV < S.liquidity_floor ? '<b>' + sim.ym[minK] + '에 큰 지출이 나가는 순간 현금이 약 ' + fm(minV) + '까지 내려가요.</b> 그 전 달 생활비를 줄이세요.' : '앞으로 12개월 동안 현금이 경고선(' + fm(S.liquidity_floor) + ') 아래로 내려가지 않습니다.';
     return { html: '<p class="small">' + msg + '</p><div class="rs">' + cells.join('') + '</div><p class="legend-note">칸마다 그 달에 들어올 돈 · 나갈 돈 · 월말에 남는 현금입니다. 저점은 큰 지출이 월급날보다 먼저 나갈 때의 최저 잔액(추정)입니다.</p>', minV, minK };
   }
+  /** 한 달에 나갈 돈을 종류별로 나눈다 (팩트 계산 기준, 만원) */
+  function monthCosts(sim, k) {
+    const S = sim.S, idx = sim.start + k;
+    const fixed = [];
+    (st.data.Expenses || []).forEach(r => { if (E.isY(r.variable)) return; const a = E.expenseAt(r, idx, S, k, 1); if (a > 0.005) fixed.push([r.name || '지출', a]); });
+    const fixSum = fixed.reduce((q, x) => q + x[1], 0);
+    if (sim.expFixed[k] - fixSum > 0.5) fixed.push(['기타 정해진 지출(월세 등)', sim.expFixed[k] - fixSum]);
+    fixed.sort((a, b) => b[1] - a[1]);
+    const ev = monthEvents(sim, k);
+    const evOut = ev.filter(x => x.amt < 0).sort((a, b) => a.amt - b.amt), evIn = ev.filter(x => x.amt > 0);
+    const fixedTotal = sim.expFixed[k], living = sim.expVar[k], debt = sim.debtPay[k];
+    const evOutTotal = -evOut.reduce((q, x) => q + x.amt, 0), evInTotal = evIn.reduce((q, x) => q + x.amt, 0);
+    return { ym: sim.ym[k], fixed, fixedTotal, living, debt, evOut, evIn, evOutTotal, evInTotal, income: sim.income[k], out: fixedTotal + living + debt + evOutTotal, end: sim.cash[k], low: sim.low[k] };
+  }
+  /** 이번 달 아직 안 적힌 자동 기록 (가계부 원 단위) */
+  function recurringLeft() {
+    const now = new Date(), ym = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0'), dim = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+    const led = st.data.Ledger || [];
+    return (st.data.Recurring || []).filter(r => E.isActive(r.active) && num(r.amount, 0) > 0 && r.type !== 'income' && (!r.start || String(r.start).slice(0, 7) <= ym) && (!r.end || String(r.end).slice(0, 7) >= ym))
+      .map(r => ({ name: r.name || r.category, amount: num(r.amount, 0), day: Math.min(dim, Math.max(1, Math.round(num(r.day, 1)))), id: 'rec_' + r.id + '_' + ym }))
+      .filter(r => r.day >= now.getDate() && !led.some(x => String(x.id) === r.id)).sort((a, b) => a.day - b.day);
+  }
+  const monthName = ym => Number(ym.slice(5, 7)) + '월';
   function renderHome() {
     ensureCompute();
-    const { sim, adv } = st, S = sim.S;
+    const { sim, adv } = st, fact = st.fact;
     const cur = A.curIdx(sim, new Date());
+    const now = new Date(), dim = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate(), daysLeft = Math.max(1, dim - now.getDate() + 1);
+    const led = st.data.Ledger || [];
+    const bc = A.budgetCap(st.data, fact, led, now);
+    const ms = A.monthStats(led, fact.ym[cur]);
+    const cap = bc.cur.cap, spent = ms.variable, remain = cap - spent, ratio = cap > 0 ? spent / cap : 0;
+    const lvl = ratio > 1 ? 'risk' : ratio > 0.8 ? 'warn' : '';
+    const mc = monthCosts(fact, cur);
+    const recLeft = recurringLeft();
+
+    // 1) 이번 달
+    const thisMonth = '<section class="card hero now"><div class="row-between"><div class="l">' + monthName(mc.ym) + ' · 생활비 남은 돈</div><span class="small muted">' + (dim - now.getDate()) + '일 남음</span></div>' +
+      (remain >= 0 ? '<div class="v">' + fm(remain) + '</div><p class="small">하루 <b>' + fm(remain / daysLeft) + '</b>씩 쓸 수 있어요 · 상한 ' + fm(cap) + ' 중 ' + fm(spent) + ' 씀' + (lvl === 'warn' ? ' <b class="neg">(80% 넘음)</b>' : '') + '</p>'
+        : '<div class="v neg">−' + fm(-remain) + '</div><p class="small"><b class="neg">생활비 상한(' + fm(cap) + ')을 넘었어요.</b> 남은 ' + (dim - now.getDate()) + '일은 꼭 필요한 지출만 하세요.</p>') +
+      '<div class="bar ' + lvl + '" role="progressbar" aria-label="생활비 사용률" aria-valuemin="0" aria-valuemax="100" aria-valuenow="' + Math.min(100, Math.round(ratio * 100)) + '"><i style="width:' + Math.min(100, ratio * 100) + '%"></i></div>' +
+      (bc.cur.tighten > 0 ? '<p class="small muted">' + esc(bc.cur.tightenYm) + ' 큰 지출에 대비해 상한을 ' + fm(bc.cur.tighten) + ' 낮췄어요.</p>' : '') +
+      '<div class="hero-split"><div><span>이번 달 들어올 돈</span><b class="pos">+' + fm(mc.income + mc.evInTotal) + '</b></div><div><span>이번 달 나갈 돈</span><b>−' + fm(mc.out) + '</b></div><div><span>월말 예상 현금</span><b' + (mc.end < 0 ? ' class="neg"' : '') + '>' + fm(mc.end) + '</b></div></div>' +
+      '<div class="toolbar"><button class="primary" data-tab="ledger">지출 입력</button></div></section>';
+
+    // 2) 곧 나갈 돈 (이번 달 + 다음 두 달)
+    const line = (l, v, note) => '<li><span>' + l + (note ? ' <em>' + note + '</em>' : '') + '</span><b>' + v + '</b></li>';
+    const monthBlock = (k, i) => {
+      const m = monthCosts(fact, k);
+      const items = [];
+      if (i === 0 && recLeft.length) recLeft.forEach(r => items.push(line(esc(r.name), won(r.amount) + '원', r.day === now.getDate() ? '오늘' : 'D-' + (r.day - now.getDate()))));
+      m.evOut.forEach(x => items.push(line('<b>' + esc(x.name) + '</b>', fm(-x.amt), x.certain ? '큰 일정' : '추정')));
+      if (m.debt > 0.5) items.push(line('대출·할부 상환', fm(m.debt)));
+      if (m.fixed.length) items.push('<li class="sub"><details><summary><span>정해진 지출 ' + m.fixed.length + '건</span><b>' + fm(m.fixedTotal) + '</b></summary><ul>' + m.fixed.map(([n, a]) => line(esc(n), fm(a))).join('') + '</ul></details></li>');
+      items.push(line('생활비 (계획)', fm(m.living)));
+      const ins = m.evIn.length ? '<p class="small muted">들어오는 큰 돈: ' + m.evIn.map(x => esc(x.name) + ' +' + fm(x.amt)).join(' · ') + '</p>' : '';
+      return '<div class="cost-month' + (m.evOut.length ? ' big' : '') + '"><div class="row-between cm-head"><h3>' + (i === 0 ? '이번 달 (' + monthName(m.ym) + ')' : m.ym.slice(0, 4) + '년 ' + monthName(m.ym)) + (m.evOut.length ? ' <span class="badge">큰 지출</span>' : '') + '</h3><b>−' + fm(m.out) + '</b></div>' +
+        '<ul class="costs">' + items.join('') + '</ul>' + ins +
+        '<p class="small ' + (m.low < fact.S.liquidity_floor ? 'neg' : 'muted') + '">월말 현금 ' + fm(m.end) + (m.low < fact.S.liquidity_floor ? ' · 월중 최저 ' + fm(m.low) + ' (경고선 아래)' : '') + '</p></div>';
+    };
+    const blocks = [];
+    for (let i = 0; i < 3 && cur + i < fact.N; i++) blocks.push(monthBlock(cur + i, i));
+    const later = [];
+    for (let k = cur + 3; k < Math.min(fact.N, cur + 12) && later.length < 4; k++) monthEvents(fact, k).filter(x => x.amt < 0).forEach(x => later.push('<li><span>' + fact.ym[k] + ' · ' + esc(x.name) + (x.certain ? '' : ' <em>추정</em>') + '</span><b>' + fm(-x.amt) + '</b></li>'));
+    const soon = '<section class="card"><div class="row-between"><h2>곧 나갈 돈</h2>' + link('월별 자세히', 'flow') + '</div>' + blocks.join('') +
+      (later.length ? '<h3 class="mt">그 뒤 큰 지출</h3><ul class="costs">' + later.slice(0, 4).join('') + '</ul>' : '') + '</section>';
+
+    // 3) 확인할 것, 4) 12개월, 5) 자산 현황
+    const alerts = adv.cards.filter(c => (c.level === 'risk' || c.level === 'warn') && c.tag !== '유동성').slice(0, 2);
+    const rs = riskStrip(fact, cur);
     const fin = sim.cash[cur] + sim.reserve[cur] + sim.invest[cur];
     const prop = sim.house[cur] + sim.re[cur] + sim.prepaid[cur] + sim.lease[cur] + sim.car[cur] + sim.other[cur];
-    const alerts = adv.cards.filter(c => (c.level === 'risk' || c.level === 'warn') && c.tag !== '유동성').slice(0, 2);
-    const fact = st.fact;
-    const rs = riskStrip(fact, cur);
-    const upcoming = [];
-    for (let k = cur; k < Math.min(fact.N, cur + 12) && upcoming.length < 3; k++) { const ev = monthEvents(fact, k); if (ev.length) upcoming.push({ k, ev }); }
-    const nextHtml = upcoming.length ? upcoming.map(u => {
-      const tot = u.ev.reduce((q, x) => q + x.amt, 0);
-      const big = u.ev.slice().sort((a, b) => Math.abs(b.amt) - Math.abs(a.amt)).slice(0, 3);
-      return '<li><div class="row-between"><b>' + sim.ym[u.k] + '</b><span>' + signed(tot) + '</span></div><div class="small muted">' + big.map(x => esc(x.name) + ' ' + fm(x.amt)).join(' · ') + (u.ev.length > 3 ? ' 외 ' + (u.ev.length - 3) + '건' : '') + '</div></li>';
-    }).join('') : '<li class="muted small">12개월 안에 예정된 큰 일정이 없습니다.</li>';
     const S0 = E.settings(st.data);
     const nameCard = !S0.name_me || !S0.name_wife || !S0.name_child ? '<section class="card"><h2>가족 이름 설정</h2><p class="small muted">화면에 "나·배우자" 대신 이름으로 보이게 합니다. 이름은 구글 시트에만 저장됩니다.</p><div class="form-row"><div><label class="f" for="nmMe">내 이름</label><input id="nmMe" value="' + esc(S0.name_me) + '"></div><div><label class="f" for="nmWife">배우자 이름</label><input id="nmWife" value="' + esc(S0.name_wife) + '"></div><div><label class="f" for="nmKid">자녀 이름</label><input id="nmKid" value="' + esc(S0.name_child) + '"></div><div><button class="primary wide" id="saveNames">저장</button></div></div></section>' : '';
-    main.innerHTML = checksHtml() + nameCard +
-      '<section class="card hero"><div class="l">우리집 순자산 · ' + sim.ym[cur] + ' 말 예상</div><div class="v">' + fm(sim.networth[cur]) + '</div>' +
-      '<div class="hero-split"><div><span>금융자산</span><b>' + fm(fin) + '</b></div><div><span>집·보증금·차</span><b>' + fm(prop) + '</b></div><div><span>부채</span><b>−' + fm(sim.debt[cur]) + '</b></div></div></section>' +
-      '<div class="grid g2">' + budgetCard(fact, cur) +
-      '<section class="card"><div class="row-between"><h2>다가오는 큰 일정</h2>' + link('전체 일정', 'flow') + '</div><ul class="timeline">' + nextHtml + '</ul></section></div>' +
-      '<section class="card"><div class="row-between"><h2>향후 12개월 현금</h2>' + link('월별 수입·지출 보기', 'flow') + '</div>' + rs.html + '</section>' +
-      (alerts.length ? '<section class="card"><div class="row-between"><h2>확인할 것</h2>' + link('추천 전체', 'analysis', 'advice') + '</div>' + alerts.map(c => '<div class="note ' + c.level + '"><div class="hd"><span class="badge">' + ({ risk: '주의', warn: '점검', ok: '양호', info: '참고' }[c.level]) + '</span><span>' + esc(c.title) + '</span></div>' + (c.body ? '<div class="body">' + esc(c.body) + '</div>' : '') + '</div>').join('') + '</section>' : '');
+    main.innerHTML = checksHtml() + nameCard + thisMonth + soon +
+      (alerts.length ? '<section class="card"><div class="row-between"><h2>확인할 것</h2>' + link('추천 전체', 'analysis', 'advice') + '</div>' + alerts.map(c => '<div class="note ' + c.level + '"><div class="hd"><span class="badge">' + ({ risk: '주의', warn: '점검', ok: '양호', info: '참고' }[c.level]) + '</span><span>' + esc(c.title) + '</span></div>' + (c.body ? '<div class="body">' + esc(c.body) + '</div>' : '') + '</div>').join('') + '</section>' : '') +
+      '<section class="card"><div class="row-between"><h2>향후 12개월 현금</h2>' + link('현금 일정', 'flow') + '</div>' + rs.html + '</section>' +
+      '<section class="card assets-mini"><div class="row-between"><h2>자산 현황</h2><span class="small muted">' + sim.ym[cur] + ' 말 예상</span></div>' +
+      '<div class="hero-split"><div><span>순자산</span><b>' + fm(sim.networth[cur]) + '</b></div><div><span>금융자산</span><b>' + fm(fin) + '</b></div><div><span>집·보증금·차</span><b>' + fm(prop) + '</b></div><div><span>부채</span><b>−' + fm(sim.debt[cur]) + '</b></div></div>' +
+      '<div class="toolbar">' + link('자산 분석', 'analysis', 'future') + link('자산 고치기', 'manage', 'assets') + '</div></section>';
   }
+
 
   /* ---------- 현금 일정 ---------- */
   /** 한 달의 들어오는 돈 / 나가는 돈 장부 (엔진 결과와 합계가 맞도록 차이는 '기타'로 맞춤) */
