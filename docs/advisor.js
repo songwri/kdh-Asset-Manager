@@ -54,7 +54,9 @@
   }
 
   /* ---------- 가계부 ---------- */
-  const isFixedCat = c => /^고정/.test(String(c || ''));
+  // 고정비 분류: 생활비 상한 계산에서 빠진다 (예전 '고정-…' 분류도 고정비로 본다)
+  const FIXED_CATS = ['관리비', '공과금', '통신비', '구독', '보험', '교육/양육', '대출/할부', '기타고정'];
+  const isFixedCat = c => /^고정/.test(String(c || '')) || FIXED_CATS.indexOf(String(c || '')) >= 0;
   const toMan = v => num(v, 0) / 10000;
 
   function monthStats(ledger, ym) {
@@ -359,7 +361,7 @@
     });
   }
 
-  const api = { eventNwEffect, fundingPlan, sellAnalysis, afterSaleCompare, fm, pct, holdingsReport, prepayEffect, monthStats, ledgerMonths, budgetCap, allocate, advise, isFixedCat, curIdx };
+  const api = { FIXED_CATS, eventNwEffect, fundingPlan, sellAnalysis, afterSaleCompare, fm, pct, holdingsReport, prepayEffect, monthStats, ledgerMonths, budgetCap, allocate, advise, isFixedCat, curIdx };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   g.Advisor = api;
 })(typeof window !== 'undefined' ? window : globalThis);

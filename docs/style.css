@@ -297,3 +297,5 @@ select.auto { width: auto; }
 .rs-cell .t { font-size: 11px; min-height: 0; }
 .rs-cell.risk .io, .rs-cell.warn .io, .rs-cell.risk i, .rs-cell.warn i { color: inherit; }
 @media (max-width: 480px) { .rs { grid-template-columns: repeat(3, 1fr); } .rs-cell { padding: 8px 7px; } .rs-cell .io { font-size: 11px; } .rs-cell .a { font-size: 13px; } }
+.chip-label { font-size: 12px; color: var(--text-2); margin: 10px 0 -4px; }
+.chip.fixed { border-style: dashed; }

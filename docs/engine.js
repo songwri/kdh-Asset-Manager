@@ -13,6 +13,7 @@
     house_target: 200000, move_in_ym: '2027-04', sell_ym: '', sell_mode: 'jeonse', sell_fee_pct: 0.77,
     house_basis_extra: 4101, house_capex: 700, after_deposit: 60000, after_rent: 150, after_rent_deposit: 5000,
     tesla: 'buy', tesla_fin_pct: 0, tesla_rate: 6, tesla_term: 60,
+    name_me: '', name_wife: '',
     no_draw: 0, // 1이면 현금이 모자라도 투자·비상금에서 꺼내지 않고 마이너스로 둔다(사실 기반 현금표용)
   };
 

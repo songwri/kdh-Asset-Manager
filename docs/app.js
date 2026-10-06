@@ -39,6 +39,16 @@
     evCat: [['house_pay', '집값 납부'], ['lease_return', '전세금 돌려받음'], ['tax', '세금'], ['fee', '수수료'], ['move', '이사·임시거주'], ['interior', '인테리어'], ['car', '자동차'], ['other', '기타']],
     account: [['일반', '일반 계좌'], ['ISA', 'ISA'], ['IRP', 'IRP'], ['연금저축', '연금저축'], ['기타', '기타']],
   };
+  /** 가족 이름은 코드에 넣지 않고 시트 설정(name_me, name_wife)에서 읽는다 (저장소가 공개라서) */
+  function names() { const S = st.data ? E.settings(st.data) : {}; return { me: S.name_me || '나', wife: S.name_wife || '배우자' }; }
+  function applyNames() { const n = names(); OPT.owner = [['me', n.me], ['wife', n.wife], ['joint', '공동']]; return n; }
+  /** 화면 문구 속 '본인'·'와이프'를 실제 이름으로 바꾼다 */
+  function nameTexts(root) {
+    const n = names();
+    if (n.me === '나' && n.wife === '배우자') return;
+    const w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    let x; while ((x = w.nextNode())) { if (/와이프|본인/.test(x.nodeValue)) x.nodeValue = x.nodeValue.replace(/와이프/g, n.wife).replace(/본인/g, n.me); }
+  }
   const optLabel = (o, v) => { const f = (OPT[o] || []).find(x => x[0] === String(v == null ? '' : v)); return f ? f[1] : (v || ''); };
 
   const F = (k, label, type, extra) => Object.assign({ k, label, type }, extra || {});
@@ -91,10 +101,10 @@
     events: ['Events', '큰 일정', '계약금·잔금, 전세금 반환, 세금, 이사처럼 한 번에 크게 들어오거나 나가는 돈입니다. 나가는 돈은 금액 앞에 −를 붙입니다.'],
   };
   const CATS_VAR = ['식비', '외식', '생활용품', '대중교통', '차량유지비', '의료', '여가·문화', '쇼핑/의류', '경조사/선물', '기타'];
-  const CATS_FIX = ['고정-주거/관리비', '고정-교육/양육', '고정-보험', '고정-통신/구독', '고정-대출/할부', '고정-기타'];
+  const CATS_FIX = A.FIXED_CATS;
   const CATS_INC = ['월급', '인센티브', '부수입', '환급', '기타수입'];
   const SETTING_GROUPS = [
-    ['가족', [['birth_me', '본인 출생연도', ''], ['birth_wife', '와이프 출생연도', ''], ['child_birth_year', '자녀 출생연도', ''], ['retire_age_me', '본인 은퇴 나이', '세'], ['retire_age_wife', '와이프 은퇴 나이', '세']]],
+    ['가족', [['name_me', '내 이름', ''], ['name_wife', '배우자 이름', ''], ['birth_me', '본인 출생연도', ''], ['birth_wife', '와이프 출생연도', ''], ['child_birth_year', '자녀 출생연도', ''], ['retire_age_me', '본인 은퇴 나이', '세'], ['retire_age_wife', '와이프 은퇴 나이', '세']]],
     ['돈 관리 기준', [['liquidity_floor', '현금 경고선', '만원'], ['emergency_months', '비상금 목표', '개월치 생활비'], ['save_rate_target', '목표 저축률', '%'], ['variable_override', '실제 생활비 (0이면 계획값)', '만원/월']]],
     ['경제 가정', [['inflation', '물가상승률', '%'], ['salary_growth', '연봉 상승률', '%'], ['invest_return', '투자 기대수익률', '%'], ['cash_rate', '예금 금리', '%']]],
     ['집', [['house_purchase_ym', '잔금 월', 'YYYY-MM'], ['move_in_ym', '입주 월', 'YYYY-MM'], ['house_price', '매매가', '만원'], ['house_mean', '집값 연평균 상승률', '%'], ['house_vol', '집값 연 변동폭', '%'], ['house_target', '목표 매도가', '만원'], ['house_basis_extra', '취득 부대비용', '만원'], ['house_capex', '양도세 경비 인정 공사비', '만원'], ['sell_fee_pct', '매도 중개보수율', '%']]],
@@ -421,7 +431,9 @@
       const big = u.ev.slice().sort((a, b) => Math.abs(b.amt) - Math.abs(a.amt)).slice(0, 3);
       return '<li><div class="row-between"><b>' + sim.ym[u.k] + '</b><span>' + signed(tot) + '</span></div><div class="small muted">' + big.map(x => esc(x.name) + ' ' + fm(x.amt)).join(' · ') + (u.ev.length > 3 ? ' 외 ' + (u.ev.length - 3) + '건' : '') + '</div></li>';
     }).join('') : '<li class="muted small">12개월 안에 예정된 큰 일정이 없습니다.</li>';
-    main.innerHTML = checksHtml() +
+    const S0 = E.settings(st.data);
+    const nameCard = !S0.name_me || !S0.name_wife ? '<section class="card"><h2>가족 이름 설정</h2><p class="small muted">화면에 "나·배우자" 대신 이름으로 보이게 합니다. 이름은 구글 시트에만 저장됩니다.</p><div class="form-row"><div><label class="f" for="nmMe">내 이름</label><input id="nmMe" value="' + esc(S0.name_me) + '"></div><div><label class="f" for="nmWife">배우자 이름</label><input id="nmWife" value="' + esc(S0.name_wife) + '"></div><div><button class="primary wide" id="saveNames">저장</button></div></div></section>' : '';
+    main.innerHTML = checksHtml() + nameCard +
       '<section class="card hero"><div class="l">우리집 순자산 · ' + sim.ym[cur] + ' 말 예상</div><div class="v">' + fm(sim.networth[cur]) + '</div>' +
       '<div class="hero-split"><div><span>금융자산</span><b>' + fm(fin) + '</b></div><div><span>집·보증금·차</span><b>' + fm(prop) + '</b></div><div><span>부채</span><b>−' + fm(sim.debt[cur]) + '</b></div></div></section>' +
       '<div class="grid g2">' + budgetCard(fact, cur) +
@@ -534,24 +546,26 @@
     const dayHtml = dayList.map(x => {
       const head = '<span class="dd"><b>' + x.d + '일</b> <span class="muted">' + WD[x.wd] + '</span></span><span class="r">' + (x.inc ? '<span class="pos">+' + won(x.inc) + '</span>' : '<span class="muted">0</span>') + '</span><span class="r">' + (x.exp ? won(x.exp) : '<span class="muted">0</span>') + '</span><span class="r muted">' + won(x.cum) + '</span>';
       if (!x.items.length) return '<div class="day empty-day">' + head + '</div>';
-      return '<details class="day"><summary>' + head + '</summary><ul class="day-items">' + x.items.map(r => '<li data-lid="' + esc(r.id) + '"><span><b>' + esc(r.category) + '</b> <span class="muted">' + (r.who === 'wife' ? '와이프' : '나') + ' · ' + esc(r.pay || '') + (r.memo ? ' · ' + esc(r.memo) : '') + '</span></span><span class="r">' + (r.type === 'income' ? '<span class="pos">+' + won(r.amount) + '</span>' : won(r.amount)) + '</span><button class="ghost danger sm" data-ldel aria-label="삭제">삭제</button></li>').join('') + '</ul></details>';
+      return '<details class="day"><summary>' + head + '</summary><ul class="day-items">' + x.items.map(r => '<li data-lid="' + esc(r.id) + '"><span><b>' + esc(r.category) + '</b> <span class="muted">' + (r.who === 'wife' ? names().wife : names().me) + ' · ' + esc(r.pay || '') + (r.memo ? ' · ' + esc(r.memo) : '') + '</span></span><span class="r">' + (r.type === 'income' ? '<span class="pos">+' + won(r.amount) + '</span>' : won(r.amount)) + '</span><button class="ghost danger sm" data-ldel aria-label="삭제">삭제</button></li>').join('') + '</ul></details>';
     }).join('');
 
     const pend = loadPending().length;
     main.innerHTML = pageHead('가계부', '오늘 쓴 돈을 바로 적으세요. 나와 와이프가 함께 입력하고, 이번 달 생활비 상한과 비교합니다.') +
       (pend ? '<div class="note warn"><div class="hd"><span class="badge">저장 대기</span><span>' + pend + '건이 아직 시트에 저장되지 않았습니다</span></div><div class="body">이 기기에 안전하게 보관 중이며, 연결되면 자동으로 저장합니다.</div><div class="toolbar"><button class="primary" id="retryPending">지금 다시 저장</button></div></div>' : '') +
       '<section class="card qe"><div class="row-between"><div class="seg" role="group" aria-label="구분">' + [['expense', '지출'], ['income', '수입']].map(([v, l]) => '<button type="button" data-ltype="' + v + '"' + (st.ltype === v ? ' class="on"' : '') + '>' + l + '</button>').join('') + '</div>' +
-      '<div class="seg" role="group" aria-label="입력자">' + [['me', '나'], ['wife', '와이프']].map(([w, l]) => '<button type="button" data-who="' + w + '"' + (who === w ? ' class="on"' : '') + '>' + l + '</button>').join('') + '</div></div>' +
+      '<div class="seg" role="group" aria-label="입력자">' + [['me', names().me], ['wife', names().wife]].map(([w, l]) => '<button type="button" data-who="' + w + '"' + (who === w ? ' class="on"' : '') + '>' + l + '</button>').join('') + '</div></div>' +
       '<input type="hidden" id="lgWho" value="' + who + '"><input type="hidden" id="lgType" value="' + st.ltype + '">' +
       '<label class="qe-label" for="lgAmt">금액 (원)</label><input id="lgAmt" class="qe-amt" data-num="1" inputmode="numeric" placeholder="0">' +
-      '<div class="chips" role="group" aria-label="분류">' + cats.map(c => '<button type="button" class="chip" data-cat="' + c + '">' + c + '</button>').join('') + '</div>' +
+      (st.ltype === 'income' ? '<div class="chips" role="group" aria-label="분류">' + cats.map(c => '<button type="button" class="chip" data-cat="' + c + '">' + c + '</button>').join('') + '</div>' :
+        '<div class="chip-label">생활비</div><div class="chips" role="group" aria-label="생활비 분류">' + CATS_VAR.map(c => '<button type="button" class="chip" data-cat="' + c + '">' + c + '</button>').join('') + '</div>' +
+        '<div class="chip-label">고정비 <span class="muted">(생활비 상한에서 빠짐)</span></div><div class="chips" role="group" aria-label="고정비 분류">' + CATS_FIX.map(c => '<button type="button" class="chip fixed" data-cat="' + c + '">' + c + '</button>').join('') + '</div>') +
       '<div class="form-row">' +
       '<div><label class="f" for="lgCat">분류</label><input id="lgCat" list="catList" placeholder="' + (st.ltype === 'income' ? '월급' : '식비') + '"><datalist id="catList">' + (st.ltype === 'income' ? CATS_INC : CATS_VAR.concat(CATS_FIX)).map(c => '<option value="' + c + '">').join('') + '</datalist></div>' +
       '<div><label class="f" for="lgDate">날짜</label><input type="date" id="lgDate" value="' + todayStr() + '"></div>' +
       '<div><label class="f" for="lgPay">결제</label><select id="lgPay"><option>카드</option><option>현금</option><option>이체</option></select></div>' +
       '<div class="span2"><label class="f" for="lgMemo">메모</label><input id="lgMemo" placeholder="선택"></div>' +
       '<div class="span-all"><button class="primary wide" id="lgAdd">' + (st.ltype === 'income' ? '수입 추가' : '지출 추가') + '</button></div></div>' +
-      (st.ltype === 'expense' ? '<p class="small muted">관리비·유치원·보험처럼 정해진 지출은 분류를 "고정-"으로 시작하게 고르면 생활비 상한 계산에서 빠집니다.</p>' : '') + '</section>' +
+      '</section>' +
 
       '<section class="card"><div class="row-between"><h2>' + yy + '년 ' + mm + '월</h2><select id="lgMonth" class="auto">' + months.map(m => '<option' + (m === ym ? ' selected' : '') + '>' + m + '</option>').join('') + '</select></div>' +
       '<div class="sum3"><div><span>수입</span><b class="pos">' + won(incTotal) + '</b></div><div><span>지출</span><b>' + won(expTotal) + '</b></div><div><span>남은 돈</span><b class="' + (incTotal - expTotal < 0 ? 'neg' : '') + '">' + won(incTotal - expTotal) + '</b></div></div>' +
@@ -848,8 +862,10 @@
   }
   function render() {
     if (!st.data) return;
+    applyNames();
     Object.keys(st.charts).forEach(k => { try { st.charts[k].destroy(); } catch (e) { /* ignore */ } delete st.charts[k]; });
     ({ home: renderHome, ledger: renderLedger, flow: renderFlow, analysis: renderAnalysis, manage: renderManage })[st.tab]();
+    nameTexts(main);
   }
   function go(tab, sub) {
     st.tab = tab; if (sub && st.subs[tab] !== undefined) st.subs[tab] = sub;
@@ -919,6 +935,12 @@
       const det = t.closest('[data-id]'), tab = t.closest('.elist').dataset.etab;
       if (!confirm('이 항목을 삭제할까요?')) return;
       try { await api('del', { tab, id: det.dataset.id }); st.data[tab] = st.data[tab].filter(r => String(r.id) !== det.dataset.id); st.dirty = true; render(); toast('삭제했습니다.'); } catch (err) { toast('삭제하지 못했습니다: ' + err.message, 'err'); }
+      return;
+    }
+    if (t.closest('#saveNames')) {
+      const a = $('#nmMe').value.trim(), b2 = $('#nmWife').value.trim();
+      if (!a || !b2) { toast('두 이름을 모두 입력하세요.', 'err'); return; }
+      try { await saveSettingValue('name_me', a); await saveSettingValue('name_wife', b2); toast('이름을 저장했습니다.'); render(); } catch (err) { toast(err.message, 'err'); }
       return;
     }
     if (t.closest('#lgAdd')) { addLedger(); return; }
