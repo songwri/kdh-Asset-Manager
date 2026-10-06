@@ -187,7 +187,7 @@
       bad.forEach(r => items.push(r.name + ': ' + pct(r.pnl) + ' (비중 ' + pct(r.weight) + ')' + (r.thesis ? ' — 사유: ' + r.thesis : ' — 보유 사유를 적어두세요')));
       items.push('판단 기준은 "이미 난 손실"이 아니라 "지금 이 종목을 새로 산다면 사겠는가". 국내 직접상장 주식은 양도세가 없어 손실 확정의 세금 이득도 손해도 없습니다.');
       items.push('대출금리 ' + (E.num((data.Debts || [])[0] && data.Debts[0].rate, 4.5)) + '%는 확정 수익률과 같습니다. 반등을 기다리는 돈이 현금이 필요한 시점과 충돌하는지 먼저 확인하세요.');
-      add(bad.length ? 'warn' : 'info', '투자 점검', '보유 종목 점검 (전체 ' + pct(hr.pnl) + ')', '종목별 판단은 [투자] 탭의 지표를 참고하세요. 특정 종목의 매도/보유를 대신 정하지는 않습니다.', items);
+      add(bad.length ? 'warn' : 'info', '투자 점검', '보유 종목 점검 (전체 ' + pct(hr.pnl) + ')', '종목별 판단은 [분석 > 투자 점검]에서 종목별 지표를 확인하세요. 특정 종목의 매도/보유를 대신 정하지는 않습니다.', items);
     }
 
     // 4. ISA
@@ -245,7 +245,7 @@
         const pm = need * r / (Math.pow(1 + r, months) - 1);
         items.push('대학 4년 비용(미래가치 약 ' + fm(need) + ')을 별도로 준비한다면 지금부터 월 ' + fm(pm) + ' 적립 필요 (수익률 ' + S.invest_return + '% 가정). 교육비는 월 현금흐름으로 감당하는 안과 비교하세요.');
       }
-      add('info', '자녀', '양육·교육비 계획', '초등 이후 교육비는 임의 가정입니다. [입력 > 지출]에서 수정하면 모든 계산에 반영됩니다.', items);
+      add('info', '자녀', '양육·교육비 계획', '초등 이후 교육비는 임의 가정입니다. [관리 > 고정 지출]에서 고치면 모든 계산에 반영됩니다.', items);
     }
 
     // 8. 세액공제
@@ -256,7 +256,7 @@
       const base = ctx.scenarios.find(s => s.isBase) || ctx.scenarios[0];
       const items = ctx.scenarios.map(s => s.label + ': ' + (s.depleteAge ? '금융자산 ' + s.depleteAge + '세에 소진' : '90세 전후까지 소진 없음') + ' · 65세 순자산 ' + fm(s.nw65));
       items.push('집 매각·주택연금, 국민연금 실제 수령액, 연금저축 수령은 반영하지 않았습니다. 보수적인 수치입니다.');
-      add(base.depleteAge ? 'warn' : 'info', '은퇴', '은퇴 시기별 비교', '[시뮬레이션] 탭에서 나이를 바꿔 직접 비교해 보세요.', items);
+      add(base.depleteAge ? 'warn' : 'info', '은퇴', '은퇴 시기별 비교', '[분석 > 은퇴·미래]에서 나이를 바꿔 직접 비교해 보세요.', items);
     }
 
     // 10. 월 잉여금 배분
