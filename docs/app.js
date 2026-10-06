@@ -137,9 +137,12 @@
   }
 
   /* ---------- API ---------- */
+  /** 연결 주소: 이 기기에서 바꾼 주소가 있으면 그것, 없으면 사이트에 넣어 둔 기본 주소(config.js) */
+  const DEFAULT_API = String((window.AM_CONFIG || {}).API_URL || '').trim();
+  const apiUrl = () => { try { return localStorage.getItem('am_api') || DEFAULT_API; } catch (e) { return DEFAULT_API; } };
   async function apiOnce(action, payload) {
     if (st.local) return { ok: true };
-    const url = localStorage.getItem('am_api');
+    const url = apiUrl();
     const token = getToken();
     let res, j;
     try {
@@ -246,7 +249,7 @@
   /* ---------- 로그인 ---------- */
   function showLogin(msg) {
     $('#app').classList.add('hidden'); $('#login').classList.remove('hidden');
-    const saved = localStorage.getItem('am_api') || '';
+    const saved = apiUrl();
     $('#apiUrl').value = saved;
     $('#apiBox').classList.toggle('hidden', !!saved);
     $('#apiSaved').classList.toggle('hidden', !saved);
@@ -262,7 +265,7 @@
     const url = $('#apiUrl').value.trim(), pin = $('#pin').value;
     if (!/^https:\/\/script\.google\.com\//.test(url)) { $('#loginErr').textContent = 'Apps Script 웹 앱 URL(https://script.google.com/...)을 입력하세요.'; return; }
     if (!/\/exec(\?.*)?$/.test(url)) { $('#loginErr').textContent = '주소가 /exec 로 끝나야 합니다. (/dev 로 끝나는 주소는 안 됩니다.)'; return; }
-    localStorage.setItem('am_api', url);
+    if (url !== DEFAULT_API) localStorage.setItem('am_api', url); else localStorage.removeItem('am_api');
     $('#loginBtn').disabled = true; $('#loginErr').textContent = '확인 중…';
     try {
       $('#loginErr').textContent = '불러오는 중…';
@@ -1090,7 +1093,7 @@
       '<div class="toolbar"><button class="primary" id="priceRefresh">지금 갱신</button><button id="fillSymbols">시세 코드 자동 채우기</button><span class="small muted" id="priceMsg"></span></div></section>';
   }
   function inviteLink() {
-    const u = localStorage.getItem('am_api') || '';
+    const u = apiUrl();
     return u ? location.origin + location.pathname + '#u=' + encodeURIComponent(u) : '';
   }
   const NO_COMMA = ['birth_me', 'birth_wife', 'child_birth_year', 'house_seed', 'years', 'retire_age_me', 'retire_age_wife'];
@@ -1317,6 +1320,6 @@
   } catch (e) { /* ignore */ }
   window.__AM = { st, go, runRecurring, start: data => { st.local = true; st.data = data; st.dirty = true; $('#login').classList.add('hidden'); $('#app').classList.remove('hidden'); renderTabs(); render(); } };
   if (window.__TEST_DATA) { window.__AM.start(window.__TEST_DATA); return; }
-  if (getToken() && localStorage.getItem('am_api')) loadAll().catch(() => showLogin(''));
+  if (getToken() && apiUrl()) loadAll().catch(() => showLogin(''));
   else showLogin('');
 })();
