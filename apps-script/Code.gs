@@ -79,9 +79,11 @@ function runSeed() {
 
 /* ---------- 보안코드 ---------- */
 
-function hash_(pin, salt) {
+// 무차별 대입은 5회 잠금으로 막으므로 반복 횟수는 적게 둔다 (예전 300회 해시는 첫 로그인 때 자동 전환)
+const PIN_ITER = 8;
+function hash_(pin, salt, iters) {
   let h = salt + ':' + pin;
-  for (let i = 0; i < 300; i++) {
+  for (let i = 0; i < (iters || 300); i++) {
     const bytes = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, h, Utilities.Charset.UTF_8);
     h = bytes.map(function (b) { return ('0' + (b & 0xff).toString(16)).slice(-2); }).join('');
   }
@@ -93,7 +95,8 @@ function setPin_(pin) {
   const salt = Utilities.getUuid();
   const props = PropertiesService.getScriptProperties();
   props.setProperty('PIN_SALT', salt);
-  props.setProperty('PIN_HASH', hash_(String(pin), salt));
+  props.setProperty('PIN_HASH', hash_(String(pin), salt, PIN_ITER));
+  props.setProperty('PIN_ITER', String(PIN_ITER));
 }
 
 function promptPin() {
@@ -115,8 +118,10 @@ function checkPin_(pin) {
   const salt = props.getProperty('PIN_SALT');
   const stored = props.getProperty('PIN_HASH');
   if (!salt || !stored) throw new Error('보안코드가 아직 설정되지 않았습니다. 시트 메뉴에서 설정하세요.');
-  if (hash_(String(pin || ''), salt) === stored) {
+  const iters = Number(props.getProperty('PIN_ITER') || 300);
+  if (hash_(String(pin || ''), salt, iters) === stored) {
     cache.remove('fails');
+    if (iters !== PIN_ITER) setPin_(String(pin)); // 예전 방식 해시를 빠른 방식으로 교체
     const token = Utilities.getUuid() + Utilities.getUuid();
     cache.put('tok_' + token, '1', TOKEN_SECONDS);
     return token;
@@ -149,10 +154,10 @@ function doPost(e) {
 }
 
 function route_(req) {
-  if (req.action === 'login') return { ok: true, token: checkPin_(req.pin) };
+  if (req.action === 'login') { const token = checkPin_(req.pin); ensureSchema_(); return { ok: true, token: token, data: readAllCached_(false), meta: meta_() }; }
   requireToken_(req.token);
   switch (req.action) {
-    case 'all':   ensureSchema_(); return { ok: true, data: readAll_(), meta: meta_() };
+    case 'all':   ensureSchema_(); return { ok: true, data: readAllCached_(!!req.fresh), meta: meta_() };
     case 'refresh': { const r = refreshPrices_({ manual: true }); return { ok: true, result: r, holdings: readTab_('Holdings'), meta: meta_() }; }
     case 'save':  return { ok: true, id: saveRow_(req.tab, req.row) };
     case 'del':   deleteRow_(req.tab, req.id); return { ok: true };
@@ -196,6 +201,19 @@ function readTab_(tab) {
   return rows;
 }
 
+/** 시트 8개를 매번 읽지 않도록 5분간 캐시 (저장·삭제·시세 갱신 때 비우고, [동기화]는 항상 새로 읽음) */
+function readAllCached_(fresh) {
+  const cache = CacheService.getScriptCache();
+  if (!fresh) {
+    const hit = cache.get('all_json');
+    if (hit) { try { return JSON.parse(hit); } catch (e) { /* 다시 읽기 */ } }
+  }
+  const data = readAll_();
+  try { const j = JSON.stringify(data); if (j.length < 95000) cache.put('all_json', j, 300); } catch (e) { /* 너무 크면 캐시 안 함 */ }
+  return data;
+}
+function dropCache_() { try { CacheService.getScriptCache().remove('all_json'); } catch (e) { /* ignore */ } }
+
 function readAll_() {
   const out = {};
   Object.keys(TABS).forEach(function (t) { out[t] = readTab_(t); });
@@ -212,6 +230,7 @@ function rowToArray_(tab, row) {
 }
 
 function saveRow_(tab, row) {
+  dropCache_();
   const lock = LockService.getScriptLock();
   lock.waitLock(15000);
   try {
@@ -235,6 +254,7 @@ function saveRow_(tab, row) {
 }
 
 function deleteRow_(tab, id) {
+  dropCache_();
   const lock = LockService.getScriptLock();
   lock.waitLock(15000);
   try {
@@ -374,7 +394,7 @@ function refreshPrices_(opts) {
 
     props.setProperty('REFRESH_LAST_RUN', String(now.getTime()));
     const problems = result.failed.map(function (x) { return '조회 실패: ' + x; }).concat(result.warnings);
-    if (result.updated > 0) props.setProperty('REFRESH_LAST_OK', at);
+    if (result.updated > 0) { props.setProperty('REFRESH_LAST_OK', at); dropCache_(); }
     props.setProperty('REFRESH_LAST_ERR', problems.join(' / '));
     result.message = '갱신 ' + result.updated + '건' + (problems.length ? ', 문제 ' + problems.length + '건' : '');
     log_(opts.auto ? 'auto' : 'manual', problems.length === 0, result.updated, problems.join(' / '));
@@ -409,12 +429,14 @@ function disableAutoRefresh_() {
 function enableAutoRefresh() {
   disableAutoRefresh_();
   ScriptApp.newTrigger('autoRefresh').timeBased().everyHours(1).create();
+  PropertiesService.getScriptProperties().setProperty('AUTO_ON', '1');
   PropertiesService.getScriptProperties().setProperty('REFRESH_FAILS', '0');
   try { SpreadsheetApp.getUi().alert('시세 자동 갱신을 켰습니다 (1시간마다).\n\n실패 알림: Apps Script 왼쪽 [트리거] > autoRefresh 편집 > 실패 알림 설정에서 "즉시 알림"을 고르면 메일로 받을 수 있습니다.'); } catch (e) { /* ignore */ }
 }
 
 function disableAutoRefresh() {
   disableAutoRefresh_();
+  PropertiesService.getScriptProperties().setProperty('AUTO_ON', '0');
   try { SpreadsheetApp.getUi().alert('시세 자동 갱신을 껐습니다.'); } catch (e) { /* ignore */ }
 }
 
@@ -426,9 +448,13 @@ function refreshNow() {
 
 function meta_() {
   const p = PropertiesService.getScriptProperties();
-  let auto = false;
-  try {
-    auto = ScriptApp.getProjectTriggers().some(function (t) { return t.getHandlerFunction() === 'autoRefresh'; });
-  } catch (e) { /* 권한 없으면 false */ }
+  let auto = p.getProperty('AUTO_ON');
+  if (auto === null) {
+    try {
+      auto = ScriptApp.getProjectTriggers().some(function (t) { return t.getHandlerFunction() === 'autoRefresh'; }) ? '1' : '0';
+      p.setProperty('AUTO_ON', auto);
+    } catch (e) { auto = '0'; }
+  }
+  auto = auto === '1';
   return { pricesAt: p.getProperty('REFRESH_LAST_OK') || '', lastErr: p.getProperty('REFRESH_LAST_ERR') || '', fails: Number(p.getProperty('REFRESH_FAILS') || 0), auto: auto };
 }

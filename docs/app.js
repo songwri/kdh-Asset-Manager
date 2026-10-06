@@ -102,11 +102,19 @@
     ['고급', [['house_seed', '집값 변동 경로 번호', ''], ['buffer_months', '현금으로 둘 기간 (넘는 돈은 투자로)', '개월 지출'], ['sweep_pct', '넘는 현금의 투자 이동 비율', '%'], ['sim_start', '계산 시작 월', 'YYYY-MM'], ['years', '계산 기간', '년']]],
   ];
 
+  /* ---------- 접속 토큰 (서버 유효 6시간, 기기에는 5시간 30분 보관) ---------- */
+  function getToken() {
+    try { const t = localStorage.getItem('am_tok'), exp = Number(localStorage.getItem('am_tok_exp') || 0); return t && exp > Date.now() ? t : null; } catch (e) { return null; }
+  }
+  function setToken(t) {
+    try { if (t) { localStorage.setItem('am_tok', t); localStorage.setItem('am_tok_exp', String(Date.now() + 5.5 * 3600 * 1000)); } else { localStorage.removeItem('am_tok'); localStorage.removeItem('am_tok_exp'); } } catch (e) { /* ignore */ }
+  }
+
   /* ---------- API ---------- */
   async function api(action, payload) {
     if (st.local) return { ok: true };
     const url = localStorage.getItem('am_api');
-    const token = sessionStorage.getItem('am_tok');
+    const token = getToken();
     let res, j;
     try {
       res = await fetch(url, { method: 'POST', body: JSON.stringify(Object.assign({ action, token }, payload || {})) });
@@ -148,7 +156,7 @@
   }
   function logout(silent) {
     try { if (!silent) api('logout'); } catch (e) { /* ignore */ }
-    sessionStorage.removeItem('am_tok'); st.data = null;
+    setToken(null); st.data = null;
     showLogin(silent ? '세션이 만료되었습니다. 다시 접속하세요.' : '');
   }
   async function doLogin() {
@@ -158,32 +166,42 @@
     localStorage.setItem('am_api', url);
     $('#loginBtn').disabled = true; $('#loginErr').textContent = '확인 중…';
     try {
-      const r = await api('login', { pin });
-      sessionStorage.setItem('am_tok', r.token);
-      await loadAll();
+      $('#loginErr').textContent = '불러오는 중…';
+      const r = await api('login', { pin });   // 로그인 응답에 데이터가 함께 온다 (왕복 1번)
+      setToken(r.token);
+      if (r.data) showData(r); else await loadAll();
+      $('#loginErr').textContent = '';
     } catch (e) { $('#loginErr').textContent = e.message; }
     $('#loginBtn').disabled = false;
   }
-  async function loadAll() {
-    status('불러오는 중…');
-    const r = await api('all');
-    st.data = r.data; st.meta = r.meta || {}; st.loadedAt = Date.now(); st.dirty = true;
+  function showData(r) {
+    st.data = r.data; st.meta = r.meta || {}; st.loadedAt = Date.now(); st.dirty = true; st.scen = null;
     $('#login').classList.add('hidden'); $('#app').classList.remove('hidden');
     status(''); renderTabs(); render();
+  }
+  async function loadAll(fresh) {
+    status('불러오는 중…');
+    showData(await api('all', fresh ? { fresh: true } : {}));
   }
 
   /* ---------- 계산 ---------- */
   function ensureCompute() {
     if (!st.dirty && st.sim) return;
     const sim = E.simulate(st.data);
-    const S = sim.S;
-    const ages = Array.from(new Set([45, 50, 55, S.retire_age_wife])).sort((a, b) => a - b);
-    const scen = ages.map(a => Object.assign(E.scenarioMetrics(st.data, { retire_age_wife: a }, '와이프 ' + a + '세 은퇴'), { isBase: a === S.retire_age_wife }));
-    st.sim = sim; st.scen = scen;
+    st.sim = sim; st.scen = null;
     // 사실 기반 현금표: 자동 투자 이동·예금 이자·투자 인출 같은 가정을 빼고 입력값만으로 계산
     st.fact = E.simulate(st.data, { sweep_pct: 0, cash_rate: 0, no_draw: 1 });
-    st.adv = A.advise(st.data, sim, { now: new Date(), scenarios: scen });
+    st.adv = A.advise(st.data, sim, { now: new Date() });
     st.dirty = false;
+  }
+  /** 은퇴 시기별 비교(50년 계산 4번)는 무거워서 분석 화면을 열 때만 계산 */
+  function ensureScenarios() {
+    ensureCompute();
+    if (st.scen) return;
+    const S = st.sim.S;
+    const ages = Array.from(new Set([45, 50, 55, S.retire_age_wife])).sort((a, b) => a - b);
+    st.scen = ages.map(a => Object.assign(E.scenarioMetrics(st.data, { retire_age_wife: a }, '와이프 ' + a + '세 은퇴'), { isBase: a === S.retire_age_wife }));
+    st.adv = A.advise(st.data, st.sim, { now: new Date(), scenarios: st.scen });
   }
 
   /* ---------- 차트 ---------- */
@@ -538,7 +556,7 @@
     return '<div class="tbl-wrap"><table><thead><tr><th>용도</th><th class="r">월 금액</th><th>이유</th></tr></thead><tbody>' + rows.map(r => '<tr><td>' + esc(r.name) + '</td><td class="r"><b>' + fm(r.amt) + '</b></td><td class="muted wrap">' + esc(r.why) + '</td></tr>').join('') + '</tbody></table></div>';
   }
   function renderAdvice() {
-    ensureCompute();
+    ensureScenarios();
     const { adv } = st;
     const order = { risk: 0, warn: 1, info: 2, ok: 3 };
     subEl().innerHTML =
@@ -791,7 +809,7 @@
   $('#apiChange').addEventListener('click', e => { e.preventDefault(); $('#apiBox').classList.remove('hidden'); $('#apiSaved').classList.add('hidden'); $('#apiUrl').focus(); });
   $('#pin').addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
   $('#logoutBtn').addEventListener('click', () => logout(false));
-  $('#reloadBtn').addEventListener('click', () => loadAll().then(() => toast('시트에서 다시 불러왔습니다.')).catch(e => toast(e.message, 'err')));
+  $('#reloadBtn').addEventListener('click', () => loadAll(true).then(() => toast('시트에서 다시 불러왔습니다.')).catch(e => toast(e.message, 'err')));
 
   function onFieldEdit(t) {
     const list = t.closest('.elist');
@@ -828,7 +846,7 @@
     let b;
     if ((b = t.closest('[data-tab]'))) { go(b.dataset.tab, b.dataset.sub); return; }
     if ((b = t.closest('[data-subnav]'))) { st.subs[st.tab] = b.dataset.subnav; render(); return; }
-    if (t.closest('#moreSync')) { loadAll().then(() => toast('시트에서 다시 불러왔습니다.')).catch(err => toast(err.message, 'err')); return; }
+    if (t.closest('#moreSync')) { loadAll(true).then(() => toast('시트에서 다시 불러왔습니다.')).catch(err => toast(err.message, 'err')); return; }
     if (t.closest('#moreOut')) { logout(false); return; }
     if ((b = t.closest('[data-ltype]'))) { st.ltype = b.dataset.ltype; renderLedger(); return; }
     if ((b = t.closest('[data-who]'))) {
@@ -930,6 +948,6 @@
   } catch (e) { /* ignore */ }
   window.__AM = { st, go, start: data => { st.local = true; st.data = data; st.dirty = true; $('#login').classList.add('hidden'); $('#app').classList.remove('hidden'); renderTabs(); render(); } };
   if (window.__TEST_DATA) { window.__AM.start(window.__TEST_DATA); return; }
-  if (sessionStorage.getItem('am_tok') && localStorage.getItem('am_api')) loadAll().catch(() => showLogin(''));
+  if (getToken() && localStorage.getItem('am_api')) loadAll().catch(() => showLogin(''));
   else showLogin('');
 })();
