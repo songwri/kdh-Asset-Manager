@@ -90,7 +90,7 @@
     debts: ['Debts', '대출·할부', '주택담보대출, 카드 할부처럼 갚아야 하는 돈입니다. 원리금균등 상환으로 계산합니다.'],
     events: ['Events', '큰 일정', '계약금·잔금, 전세금 반환, 세금, 이사처럼 한 번에 크게 들어오거나 나가는 돈입니다. 나가는 돈은 금액 앞에 −를 붙입니다.'],
   };
-  const CATS_VAR = ['식비', '생활용품', '교통/차량', '의료', '여가/외식', '쇼핑/의류', '경조사/선물', '기타'];
+  const CATS_VAR = ['식비', '외식', '생활용품', '대중교통', '차량유지비', '의료', '여가·문화', '쇼핑/의류', '경조사/선물', '기타'];
   const CATS_FIX = ['고정-주거/관리비', '고정-교육/양육', '고정-보험', '고정-통신/구독', '고정-대출/할부', '고정-기타'];
   const CATS_INC = ['월급', '인센티브', '부수입', '환급', '기타수입'];
   const SETTING_GROUPS = [
@@ -111,7 +111,7 @@
   }
 
   /* ---------- API ---------- */
-  async function api(action, payload) {
+  async function apiOnce(action, payload) {
     if (st.local) return { ok: true };
     const url = localStorage.getItem('am_api');
     const token = getToken();
@@ -124,9 +124,47 @@
     try { j = await res.json(); } catch (e) {
       throw new Error('응답이 올바르지 않습니다. 배포의 액세스 권한을 "모든 사용자"로 하고 새 버전으로 다시 배포했는지 확인하세요.');
     }
-    if (!j.ok) { if (j.error === 'AUTH') { logout(true); } throw new Error(j.error || '오류'); }
+    if (!j.ok) {
+      const err = new Error(j.error === 'AUTH' ? '접속이 만료되었습니다' : (j.error || '오류'));
+      if (j.error === 'AUTH') { err.auth = true; logout(true); }
+      throw err;
+    }
     return j;
   }
+  /** 저장·삭제는 일시적인 오류(모바일 네트워크 끊김, 서버 잠금 대기 등)면 최대 2번 더 시도 */
+  async function api(action, payload) {
+    const retry = action === 'save' || action === 'del';
+    for (let i = 0; ; i++) {
+      try { return await apiOnce(action, payload); } catch (e) {
+        if (!retry || i >= 2 || e.auth || /unknown|탭이 없|보안코드/.test(e.message)) throw e;
+        await new Promise(r => setTimeout(r, 900 * (i + 1)));
+      }
+    }
+  }
+
+  /* ---------- 저장 대기열: 저장에 실패한 가계부 내역을 기기에 보관했다가 다시 보낸다 ---------- */
+  const PKEY = 'am_pending';
+  const loadPending = () => { try { return JSON.parse(localStorage.getItem(PKEY) || '[]'); } catch (e) { return []; } };
+  const savePending = a => { try { if (a.length) localStorage.setItem(PKEY, JSON.stringify(a)); else localStorage.removeItem(PKEY); } catch (e) { /* ignore */ } };
+  let flushing = false;
+  async function flushPending() {
+    const q = loadPending();
+    if (!q.length || !st.data || flushing) return;
+    flushing = true;
+    const left = []; let done = 0, stop = false;
+    for (const it of q) {
+      if (stop) { left.push(it); continue; }
+      try {
+        await apiOnce('save', it);
+        const list = (st.data[it.tab] = st.data[it.tab] || []);
+        if (!list.some(r => String(r.id) === String(it.row.id))) list.push(it.row);
+        done++;
+      } catch (e) { left.push(it); if (e.auth || !st.data) stop = true; }
+    }
+    savePending(left); flushing = false;
+    if (done) { st.dirty = true; toast('보관해 둔 ' + done + '건을 저장했습니다.' + (left.length ? ' (' + left.length + '건 남음)' : '')); if (st.data) render(); }
+  }
+  window.addEventListener('online', () => flushPending());
   const status = t => { $('#status').textContent = t; };
   let toastTimer = null;
   function toast(msg, kind) {
@@ -176,8 +214,10 @@
   }
   function showData(r) {
     st.data = r.data; st.meta = r.meta || {}; st.loadedAt = Date.now(); st.dirty = true; st.scen = null;
+    loadPending().forEach(it => { const list = (st.data[it.tab] = st.data[it.tab] || []); if (!list.some(x => String(x.id) === String(it.row.id))) list.push(it.row); });
     $('#login').classList.add('hidden'); $('#app').classList.remove('hidden');
     status(''); renderTabs(); render();
+    setTimeout(flushPending, 300);
   }
   async function loadAll(fresh) {
     status('불러오는 중…');
@@ -497,7 +537,9 @@
       return '<details class="day"><summary>' + head + '</summary><ul class="day-items">' + x.items.map(r => '<li data-lid="' + esc(r.id) + '"><span><b>' + esc(r.category) + '</b> <span class="muted">' + (r.who === 'wife' ? '와이프' : '나') + ' · ' + esc(r.pay || '') + (r.memo ? ' · ' + esc(r.memo) : '') + '</span></span><span class="r">' + (r.type === 'income' ? '<span class="pos">+' + won(r.amount) + '</span>' : won(r.amount)) + '</span><button class="ghost danger sm" data-ldel aria-label="삭제">삭제</button></li>').join('') + '</ul></details>';
     }).join('');
 
+    const pend = loadPending().length;
     main.innerHTML = pageHead('가계부', '오늘 쓴 돈을 바로 적으세요. 나와 와이프가 함께 입력하고, 이번 달 생활비 상한과 비교합니다.') +
+      (pend ? '<div class="note warn"><div class="hd"><span class="badge">저장 대기</span><span>' + pend + '건이 아직 시트에 저장되지 않았습니다</span></div><div class="body">이 기기에 안전하게 보관 중이며, 연결되면 자동으로 저장합니다.</div><div class="toolbar"><button class="primary" id="retryPending">지금 다시 저장</button></div></div>' : '') +
       '<section class="card qe"><div class="row-between"><div class="seg" role="group" aria-label="구분">' + [['expense', '지출'], ['income', '수입']].map(([v, l]) => '<button type="button" data-ltype="' + v + '"' + (st.ltype === v ? ' class="on"' : '') + '>' + l + '</button>').join('') + '</div>' +
       '<div class="seg" role="group" aria-label="입력자">' + [['me', '나'], ['wife', '와이프']].map(([w, l]) => '<button type="button" data-who="' + w + '"' + (who === w ? ' class="on"' : '') + '>' + l + '</button>').join('') + '</div></div>' +
       '<input type="hidden" id="lgWho" value="' + who + '"><input type="hidden" id="lgType" value="' + st.ltype + '">' +
@@ -533,12 +575,19 @@
     if (!amt) { toast('금액을 입력하세요.', 'err'); $('#lgAmt').focus(); return; }
     const type = $('#lgType').value;
     const row = { id: newId('led'), date: $('#lgDate').value || todayStr(), type, amount: amt, category: $('#lgCat').value.trim() || (type === 'income' ? '기타수입' : '기타'), who: $('#lgWho').value, pay: $('#lgPay').value, memo: $('#lgMemo').value.trim() };
-    try {
-      status('저장 중…'); await api('save', { tab: 'Ledger', row });
-      (st.data.Ledger = st.data.Ledger || []).push(row); st.dirty = true; status('저장됨'); st.ledgerMonth = row.date.slice(0, 7);
-      renderLedger(); toast((type === 'income' ? '수입 ' : '지출 ') + won(amt) + '원을 기록했습니다.');
-      const a = $('#lgAmt'); if (a) a.focus();
-    } catch (e) { status('저장 실패'); toast('저장하지 못했습니다: ' + e.message, 'err'); }
+    const btn = $('#lgAdd'); if (btn) btn.disabled = true;
+    (st.data.Ledger = st.data.Ledger || []).push(row); st.dirty = true; st.ledgerMonth = row.date.slice(0, 7);
+    status('저장 중…');
+    let saved = false, why = '';
+    try { await api('save', { tab: 'Ledger', row }); saved = true; } catch (e) {
+      why = e.message;
+      const q = loadPending(); q.push({ tab: 'Ledger', row }); savePending(q);
+    }
+    status(saved ? '저장됨' : '저장 대기');
+    if (st.data) { try { renderLedger(); } catch (e) { /* 화면 오류가 저장 실패로 보이지 않게 */ } }
+    const label = (type === 'income' ? '수입 ' : '지출 ') + won(amt) + '원';
+    toast(saved ? label + '을 기록했습니다.' : label + '을 이 기기에 보관했습니다. 연결되면 자동으로 저장합니다. (' + why + ')', saved ? '' : 'err');
+    const a = $('#lgAmt'); if (a && st.data) a.focus();
   }
 
   /* ---------- 분석 ---------- */
@@ -873,6 +922,7 @@
       return;
     }
     if (t.closest('#lgAdd')) { addLedger(); return; }
+    if (t.closest('#retryPending')) { flushPending().then(() => { if (st.tab === 'ledger') renderLedger(); }); return; }
     if (t.closest('[data-ldel]')) {
       const id = t.closest('[data-lid]').dataset.lid;
       if (!confirm('이 내역을 삭제할까요?')) return;

@@ -232,7 +232,7 @@ function rowToArray_(tab, row) {
 function saveRow_(tab, row) {
   dropCache_();
   const lock = LockService.getScriptLock();
-  lock.waitLock(15000);
+  if (!lock.tryLock(30000)) throw new Error('다른 작업이 저장 중이라 기다리다 시간이 초과됐습니다. 잠시 후 다시 시도하세요.');
   try {
     const sh = sheet_(tab);
     if (!row.id) row.id = Utilities.getUuid().slice(0, 8);
@@ -256,7 +256,7 @@ function saveRow_(tab, row) {
 function deleteRow_(tab, id) {
   dropCache_();
   const lock = LockService.getScriptLock();
-  lock.waitLock(15000);
+  if (!lock.tryLock(30000)) throw new Error('다른 작업이 저장 중이라 기다리다 시간이 초과됐습니다. 잠시 후 다시 시도하세요.');
   try {
     const sh = sheet_(tab);
     const last = sh.getLastRow();
@@ -332,28 +332,32 @@ function log_(kind, ok, updated, msg) {
 function refreshPrices_(opts) {
   opts = opts || {};
   const props = PropertiesService.getScriptProperties();
+  const cache = CacheService.getScriptCache();
   const now = new Date();
   const lastRun = Number(props.getProperty('REFRESH_LAST_RUN') || 0);
   if (opts.manual && now.getTime() - lastRun < MIN_MANUAL_INTERVAL_MS) {
     return { skipped: true, updated: 0, warnings: [], failed: [], message: '방금 갱신했습니다. 5분 뒤에 다시 시도하세요.' };
   }
-  const lock = LockService.getScriptLock();
-  if (!lock.tryLock(20000)) throw new Error('다른 저장 작업 중입니다. 잠시 후 다시 시도하세요.');
+  // 시세를 기다리는 동안(최대 20초)에는 저장 잠금을 잡지 않는다 → 그 사이 가계부 저장이 막히지 않음
+  if (cache.get('refreshing')) return { skipped: true, updated: 0, warnings: [], failed: [], message: '시세를 갱신하는 중입니다. 잠시 후 다시 확인하세요.' };
+  cache.put('refreshing', '1', 90);
   const result = { skipped: false, updated: 0, warnings: [], failed: [], message: '' };
   try {
     ensureSchema_();
     const sh = sheet_('Holdings');
     const H = TABS.Holdings;
     const col = function (k) { return H.indexOf(k); };
-    const last = sh.getLastRow();
-    const targets = [];
-    if (last >= 2) {
+    const readTargets = function () {
+      const last = sh.getLastRow(), list = [];
+      if (last < 2) return list;
       sh.getRange(2, 1, last - 1, H.length).getValues().forEach(function (r, i) {
         const sym = String(r[col('symbol')] || '').trim();
         const act = !/^(n|no|false|0)$/i.test(String(r[col('active')] || '').trim());
-        if (r[0] && sym && act) targets.push({ row: i + 2, symbol: sym, prev: Number(r[col('price')]) || 0, name: r[col('name')] });
+        if (r[0] && sym && act) list.push({ id: String(r[0]), row: i + 2, symbol: sym, prev: Number(r[col('price')]) || 0, name: r[col('name')] });
       });
-    }
+      return list;
+    };
+    const targets = readTargets();
     if (!targets.length) {
       result.message = '시세 코드가 입력된 종목이 없습니다.';
       props.setProperty('REFRESH_LAST_RUN', String(now.getTime()));
@@ -379,28 +383,36 @@ function refreshPrices_(opts) {
       if (!pending) break;
     }
 
+    // 쓰는 순간에만 짧게 잠금. 기다리는 사이 행이 지워지거나 옮겨졌을 수 있으니 id로 다시 찾는다
     const at = stamp_(now);
-    targets.forEach(function (t) {
-      const p = prices[t.symbol];
-      if (!(p > 0)) { result.failed.push(t.name + ' (' + t.symbol + ')'); return; }
-      if (t.prev > 0 && (p / t.prev < 0.65 || p / t.prev > 1.35)) {
-        result.warnings.push(t.name + ': 시세 ' + p + '가 기존 ' + t.prev + '와 35% 넘게 달라 반영하지 않음 (코드/통화 확인)');
-        return;
-      }
-      sh.getRange(t.row, col('price') + 1).setValue(p);
-      sh.getRange(t.row, col('price_at') + 1).setValue(at);
-      result.updated++;
-    });
+    const lock = LockService.getScriptLock();
+    lock.waitLock(20000);
+    try {
+      readTargets().forEach(function (t) {
+        const p = prices[t.symbol];
+        if (!(p > 0)) { result.failed.push(t.name + ' (' + t.symbol + ')'); return; }
+        if (t.prev > 0 && (p / t.prev < 0.65 || p / t.prev > 1.35)) {
+          result.warnings.push(t.name + ': 시세 ' + p + '가 기존 ' + t.prev + '와 35% 넘게 달라 반영하지 않음 (코드/통화 확인)');
+          return;
+        }
+        sh.getRange(t.row, col('price') + 1, 1, 1).setValue(p);
+        sh.getRange(t.row, col('price_at') + 1, 1, 1).setValue(at);
+        result.updated++;
+      });
+      dropCache_();
+    } finally {
+      lock.releaseLock();
+    }
 
     props.setProperty('REFRESH_LAST_RUN', String(now.getTime()));
     const problems = result.failed.map(function (x) { return '조회 실패: ' + x; }).concat(result.warnings);
-    if (result.updated > 0) { props.setProperty('REFRESH_LAST_OK', at); dropCache_(); }
+    if (result.updated > 0) props.setProperty('REFRESH_LAST_OK', at);
     props.setProperty('REFRESH_LAST_ERR', problems.join(' / '));
     result.message = '갱신 ' + result.updated + '건' + (problems.length ? ', 문제 ' + problems.length + '건' : '');
     log_(opts.auto ? 'auto' : 'manual', problems.length === 0, result.updated, problems.join(' / '));
     return result;
   } finally {
-    lock.releaseLock();
+    cache.remove('refreshing');
   }
 }
 
