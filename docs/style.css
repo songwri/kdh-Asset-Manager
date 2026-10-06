@@ -286,3 +286,14 @@ select.auto { width: auto; }
   .tacct { grid-template-columns: 1fr; } .tcol.in { border-right: 0; border-bottom: 1px solid var(--line); }
   .msheet > summary { grid-template-columns: 1fr auto; } .ms-n { grid-column: 1 / -1; justify-content: flex-start; order: 3; font-size: 13px; }
 }
+
+/* 12개월 현금 칸: 들어옴 · 나감 · 월말 */
+.rs-cell { text-align: left; padding: 9px 10px; }
+.rs-cell .m { font-size: 11px; }
+.rs-cell .io { display: flex; flex-direction: column; font-size: 12px; margin: 3px 0 2px; color: var(--text-2); }
+.rs-cell .io span, .rs-cell .a { display: flex; justify-content: space-between; gap: 6px; }
+.rs-cell i { font-style: normal; font-size: 11px; color: var(--muted); font-weight: 400; }
+.rs-cell .a { font-size: 14px; border-top: 1px solid rgba(127,127,127,.18); padding-top: 3px; }
+.rs-cell .t { font-size: 11px; min-height: 0; }
+.rs-cell.risk .io, .rs-cell.warn .io, .rs-cell.risk i, .rs-cell.warn i { color: inherit; }
+@media (max-width: 480px) { .rs { grid-template-columns: repeat(3, 1fr); } .rs-cell { padding: 8px 7px; } .rs-cell .io { font-size: 11px; } .rs-cell .a { font-size: 13px; } }

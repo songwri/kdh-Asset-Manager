@@ -356,10 +356,14 @@
     for (let k = cur; k < Math.min(sim.N, cur + 12); k++) {
       const v = sim.low[k]; if (v < minV) { minV = v; minK = k; }
       const c = v < S.liquidity_floor ? 'risk' : v < S.liquidity_floor * 2 ? 'warn' : 'ok';
-      cells.push('<div class="rs-cell ' + c + '"><div class="m">' + sim.ym[k].slice(2).replace('-', '.') + '</div><div class="a">' + fm(v) + '</div><div class="t">' + ({ risk: '주의', warn: '빠듯', ok: '' }[c]) + '</div></div>');
+      const m = monthSheet(sim, k);
+      cells.push('<div class="rs-cell ' + c + '"><div class="m">' + sim.ym[k].slice(2).replace('-', '.') + (m.hasEvent ? ' · 큰 일정' : '') + '</div>' +
+        '<div class="io"><span><i>들어옴</i>+' + fm(m.inTotal) + '</span><span><i>나감</i>−' + fm(m.outTotal) + '</span></div>' +
+        '<div class="a"><i>월말</i>' + fm(m.end) + '</div>' +
+        '<div class="t">' + (c === 'ok' ? '' : ({ risk: '주의', warn: '빠듯' }[c]) + ' · 저점 ' + fm(v)) + '</div></div>');
     }
-    const msg = minV < S.liquidity_floor ? '<b>' + sim.ym[minK] + '에 약 ' + fm(minV) + '까지 내려가요.</b> 그 전 달 생활비를 줄이세요.' : '앞으로 12개월 동안 현금이 경고선(' + fm(S.liquidity_floor) + ') 아래로 내려가지 않습니다.';
-    return { html: '<p class="small">' + msg + '</p><div class="rs">' + cells.join('') + '</div>', minV, minK };
+    const msg = minV < S.liquidity_floor ? '<b>' + sim.ym[minK] + '에 큰 지출이 나가는 순간 현금이 약 ' + fm(minV) + '까지 내려가요.</b> 그 전 달 생활비를 줄이세요.' : '앞으로 12개월 동안 현금이 경고선(' + fm(S.liquidity_floor) + ') 아래로 내려가지 않습니다.';
+    return { html: '<p class="small">' + msg + '</p><div class="rs">' + cells.join('') + '</div><p class="legend-note">칸마다 그 달에 들어올 돈 · 나갈 돈 · 월말에 남는 현금입니다. 저점은 큰 지출이 월급날보다 먼저 나갈 때의 최저 잔액(추정)입니다.</p>', minV, minK };
   }
   function renderHome() {
     ensureCompute();
