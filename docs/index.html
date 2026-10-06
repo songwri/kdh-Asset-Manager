@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>우리집 자산관리</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%232a78d6'/%3E%3Cpath d='M7 22l6-7 5 4 7-9' stroke='white' stroke-width='3' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<section id="login" class="hidden">
+  <div class="card">
+    <h1>우리집 자산관리</h1>
+    <p class="muted small">데이터는 구글 시트에만 저장되며, 보안코드를 입력해야 불러옵니다.</p>
+    <label class="f" for="apiUrl">Apps Script 웹 앱 URL <span class="muted">(처음 한 번만)</span></label>
+    <input id="apiUrl" type="url" placeholder="https://script.google.com/macros/s/.../exec" autocomplete="off">
+    <label class="f" for="pin">보안코드</label>
+    <input id="pin" type="password" autocomplete="current-password">
+    <div style="margin-top:16px"><button id="loginBtn" class="primary" style="width:100%">접속</button></div>
+    <div id="loginErr" class="err" role="alert"></div>
+  </div>
+</section>
+
+<div id="app" class="hidden">
+  <header class="top">
+    <div class="top-in">
+      <span class="brand">우리집 자산관리</span>
+      <nav class="tabs" id="tabs" aria-label="메뉴"></nav>
+      <span id="status" aria-live="polite"></span>
+      <button class="ghost" id="reloadBtn" title="시트에서 다시 불러오기">↻</button>
+      <button class="ghost" id="logoutBtn">나가기</button>
+    </div>
+  </header>
+  <main id="main"></main>
+</div>
+
+<script src="vendor/chart.umd.js"></script>
+<script src="engine.js"></script>
+<script src="advisor.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

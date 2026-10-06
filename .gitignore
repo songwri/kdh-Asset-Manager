@@ -1,0 +1,4 @@
+# 개인 데이터는 git에 올리지 않습니다 (구글 시트에만 보관)
+private/
+node_modules/
+*.local
