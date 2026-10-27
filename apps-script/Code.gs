@@ -112,6 +112,19 @@ function promptPin() {
   }
 }
 
+/** 보안코드를 잊었을 때: [프로젝트 설정 > 스크립트 속성]에 NEW_PIN 을 추가하고(값 = 새 보안코드, 8자 이상),
+ *  편집기에서 이 함수(resetPin)를 실행하면 보안코드가 바뀌고 잠금도 풀린다. NEW_PIN 속성은 실행 직후 자동으로 지워진다. */
+function resetPin() {
+  const props = PropertiesService.getScriptProperties();
+  const pin = props.getProperty('NEW_PIN');
+  if (!pin) throw new Error('스크립트 속성에 NEW_PIN 이 없습니다. [프로젝트 설정 > 스크립트 속성]에 NEW_PIN(값=새 보안코드)을 먼저 추가하세요.');
+  setPin_(String(pin).trim());
+  props.deleteProperty('NEW_PIN');
+  const cache = CacheService.getScriptCache();
+  cache.remove('locked'); cache.remove('fails');
+  try { SpreadsheetApp.getUi().alert('보안코드를 바꿨습니다. 새 코드로 접속하세요.'); } catch (e) { Logger.log('보안코드를 바꿨습니다.'); }
+}
+
 function checkPin_(pin) {
   const cache = CacheService.getScriptCache();
   if (cache.get('locked')) throw new Error('시도 횟수 초과. 15분 후 다시 시도하세요.');
