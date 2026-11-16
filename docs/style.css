@@ -337,3 +337,25 @@ ul.costs li.sub ul { list-style: none; padding: 4px 0 0 12px; margin: 0; }
 ul.costs li.sub ul li { font-size: 13px; padding: 3px 0; }
 .assets-mini .hero-split { grid-template-columns: repeat(4, auto); }
 @media (max-width: 480px) { .assets-mini .hero-split { grid-template-columns: repeat(2, auto); } }
+
+/* 매달 반복 vs 이 달에만(특이) 구분 */
+.spec { margin: 8px 4px 12px; padding: 10px 14px; border-radius: 10px; background: var(--warn-bg); border-left: 3px solid var(--warn); }
+.spec-hd { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; margin-bottom: 4px; }
+.spec-hd b { margin-left: auto; font-variant-numeric: tabular-nums; font-size: 15px; }
+.spec .badge, .badge.spec-badge { background: var(--warn); color: var(--surface); }
+.badge.spec-badge::before, .spec .badge::before { display: none; }
+.spec ul { list-style: none; margin: 0; padding: 0; }
+.spec li { display: flex; justify-content: space-between; gap: 10px; padding: 4px 0; font-size: 14px; font-variant-numeric: tabular-nums; border-top: 1px dashed rgba(127,127,127,.25); }
+.spec li:first-child { border-top: 0; }
+.spec li em { font-style: normal; font-size: 11px; color: var(--muted); margin-left: 4px; }
+.reg-hd { display: flex; justify-content: space-between; margin: 4px 8px 0; font-size: 12px; font-weight: 600; color: var(--text-2); font-variant-numeric: tabular-nums; }
+.rs-cell .io span.sp { color: var(--warn); font-weight: 600; }
+.rs-cell.risk .io span.sp { color: inherit; }
+.cost-month.big { background: linear-gradient(90deg, var(--warn-bg), transparent 70%); border-radius: 8px; padding-left: 8px; padding-right: 8px; }
+ul.costs li.sep { margin-top: 4px; padding-top: 8px; border-top: 1px dashed var(--line); font-size: 11px; }
+ul.costs li.sep > span { color: var(--muted); }
+
+/* 큰 일정 붙여넣기 */
+.ev-import textarea { width: 100%; min-height: 150px; font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.ev-import table td.r, .ev-import table th.r { text-align: right; }
+.ev-import .muted-row td { color: var(--muted); }
