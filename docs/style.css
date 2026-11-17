@@ -359,3 +359,6 @@ ul.costs li.sep > span { color: var(--muted); }
 .ev-import textarea { width: 100%; min-height: 150px; font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
 .ev-import table td.r, .ev-import table th.r { text-align: right; }
 .ev-import .muted-row td { color: var(--muted); }
+ul.costs li.evx label { display: flex; align-items: flex-start; gap: 10px; cursor: pointer; }
+ul.costs li.evx input[type=checkbox] { width: 18px; height: 18px; flex: none; margin: 2px 0 0; }
+ul.costs li.evx .evx-i { width: 18px; flex: none; text-align: center; color: var(--muted); }

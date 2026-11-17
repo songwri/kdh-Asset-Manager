@@ -280,6 +280,7 @@
     st.data = r.data; st.meta = r.meta || {}; st.loadedAt = Date.now(); st.dirty = true; st.scen = null;
     applyPending(st.data);
     $('#login').classList.add('hidden'); $('#app').classList.remove('hidden');
+    openPendingPlan();
     status(''); renderTabs(); render();
     setTimeout(() => { runRecurring().then(flushPending); }, 300);
   }
@@ -1192,8 +1193,30 @@
     old.forEach(e => { if (imp.off[e.id] === undefined) imp.off[e.id] = EV_REPLACE.indexOf(String(e.category)) >= 0 && cats.has(String(e.category)); });
     return { rows, upd, old, from, to };
   }
+  /** 적용 링크: #plan=<base64url JSON>. 로그인 전에 열려도 잃지 않게 sessionStorage에 두었다가 데이터를 불러온 뒤 보여준다 */
+  function takePlanFromHash() {
+    const m = /[#&]plan=([^&]+)/.exec(location.hash);
+    if (!m) return;
+    try {
+      const b = m[1].replace(/-/g, '+').replace(/_/g, '/');
+      const bytes = Uint8Array.from(atob(b + '==='.slice((b.length + 3) % 4)), c => c.charCodeAt(0));
+      const plan = JSON.parse(new TextDecoder().decode(bytes));
+      sessionStorage.setItem('am_plan', JSON.stringify(plan));
+    } catch (e) { /* 잘못된 링크는 무시 */ }
+    history.replaceState(null, '', location.pathname + location.search);
+  }
+  function openPendingPlan() {
+    let plan = null;
+    try { plan = JSON.parse(sessionStorage.getItem('am_plan') || 'null'); } catch (e) { plan = null; }
+    if (!plan || !st.data) return false;
+    const rows = (plan.events || []).map(r => Object.assign({ certain: 'Y', note: '', active: 'Y', category: 'other' }, r, { err: '' }));
+    st.evImp = { open: true, txt: '', rows, off: {}, xoff: {}, plan };
+    st.tab = 'manage'; st.subs.manage = 'events';
+    return true;
+  }
   function evImportHtml() {
-    const imp = st.evImp = st.evImp || { open: false, txt: '', rows: null, off: {} };
+    const imp = st.evImp = st.evImp || { open: false, txt: '', rows: null, off: {}, xoff: {} };
+    imp.xoff = imp.xoff || {};
     let body = '<p class="small muted">한 줄에 일정 하나씩, 칸은 <b>|</b> 또는 탭으로 나눕니다. 순서: <b>월 | 내용 | 금액(만원, 나가는 돈은 −) | 종류 | 확정(Y/N) | 메모</b>. 종류는 집값 납부·전세금 돌려받음·세금·수수료·이사·임시거주·인테리어·자동차·기타 중 하나. 엑셀·구글 시트에서 복사해 붙여도 됩니다. #으로 시작하는 줄은 무시합니다.</p>' +
       '<textarea id="evTxt" placeholder="2027-01 | 중도금 | -2800 | 집값 납부 | Y | ">' + esc(imp.txt || '') + '</textarea>' +
       '<div class="toolbar"><button class="primary" id="evParse">읽기</button>' + (imp.rows ? '<button class="ghost" id="evClear">지우기</button>' : '') + '</div>';
@@ -1207,14 +1230,53 @@
       if (plan.old.length) body += '<h3 class="mt">같은 기간(' + plan.from + ' ~ ' + plan.to + ')의 기존 일정</h3><p class="small muted">체크한 일정은 삭제하지 않고 <b>제외(기록만)</b>로 바꿔 계산에서 뺍니다. 예전 숫자로 넣어 둔 일정을 체크하세요. 나중에 [계산]을 다시 "포함"으로 바꾸면 되살아납니다.</p>' +
         '<div class="tbl-wrap mini"><table><thead><tr><th>제외</th><th>월</th><th>내용</th><th>종류</th><th class="r">금액</th></tr></thead><tbody>' +
         plan.old.map(e => '<tr><td><input type="checkbox" data-evoff="' + esc(e.id) + '"' + (imp.off[e.id] ? ' checked' : '') + ' aria-label="제외"></td><td>' + esc(e.date) + '</td><td>' + esc(e.name) + '</td><td>' + esc(optLabel('evCat', e.category)) + '</td><td class="r">' + signed(num(e.amount, 0)) + '</td></tr>').join('') + '</tbody></table></div>';
-      if (plan.rows.length) body += '<div class="toolbar"><button class="primary" id="evApply">반영하기 (추가·덮어쓰기 ' + plan.rows.length + '건' + (plan.old.filter(e => imp.off[e.id]).length ? ', 제외 ' + plan.old.filter(e => imp.off[e.id]).length + '건' : '') + ')</button></div>';
+      body += planExtrasHtml();
+      if (plan.rows.length) body += '<div class="toolbar"><button class="primary" id="evApply">반영하기 (추가·덮어쓰기 ' + plan.rows.length + '건' + (plan.old.filter(e => imp.off[e.id]).length ? ', 제외 ' + plan.old.filter(e => imp.off[e.id]).length + '건' : '') + (imp.plan ? ', 대출·가정값 등 함께' : '') + ')</button></div>';
     }
-    return '<details class="card paste-card ev-import"' + (imp.open ? ' open' : '') + ' id="evImport"><summary><h2>여러 일정 한 번에 붙여넣기</h2><span class="small muted">새 계약 일정처럼 바뀐 숫자를 한꺼번에 반영</span></summary>' + body + '</details>';
+    return '<details class="card paste-card ev-import"' + (imp.open ? ' open' : '') + ' id="evImport"><summary><h2>여러 일정 한 번에 붙여넣기</h2><span class="small muted">새 계약 일정처럼 바뀐 숫자를 한꺼번에 반영</span></summary>' + (imp.plan ? '<div class="note info"><div class="hd"><span class="badge">적용 링크</span><span>' + esc(imp.plan.title || '받은 변경 묶음') + '</span></div><div class="body">아래 내용을 확인하고 맨 아래 [반영하기]를 누르면 시트에 저장됩니다. 체크를 풀면 그 항목은 건너뜁니다.</div></div>' : '') + body + '</details>';
+  }
+  /** 적용 링크(#plan=...)에 함께 들어온 대출·가정값·고정 지출 변경과 자산 점검 */
+  const PLAN_LABEL = { principal: '빌린 금액', start: '실행 월', disburse: '실행할 때 돈이 들어옴', rate: '금리', term: '기간', house_purchase_ym: '잔금 월', move_in_ym: '입주 월', house_price: '매매가' };
+  function planExtras() {
+    const plan = st.evImp && st.evImp.plan;
+    if (!plan) return [];
+    const out = [];
+    (plan.debts || []).forEach((d, i) => {
+      const re = new RegExp(d.match || '주택|담보|주담');
+      const cur = (st.data.Debts || []).find(r => E.isActive(r.active) && re.test(String(r.name)));
+      const set = d.set || {};
+      if (cur) {
+        const ch = Object.keys(set).filter(k => String(cur[k]) !== String(set[k]));
+        if (ch.length) out.push({ key: 'debt' + i, tab: 'Debts', label: '대출 "' + cur.name + '"', desc: ch.map(k => (PLAN_LABEL[k] || k) + ': ' + (cur[k] === '' || cur[k] == null ? '(빈칸)' : cur[k]) + ' → ' + set[k]).join(', '), row: Object.assign({}, cur, set), target: cur });
+        else out.push({ key: 'debt' + i, info: true, label: '대출 "' + cur.name + '"', desc: '이미 맞습니다' });
+      } else out.push({ key: 'debt' + i, tab: 'Debts', label: '대출 새로 추가', desc: (d.create && d.create.name || '주택담보대출') + ' ' + fm(set.principal || 0) + ' (금리·기간은 가정값, 나중에 확인)', row: Object.assign({ id: newId('deb'), note: '' }, d.create || {}, set, { active: 'Y' }) });
+    });
+    Object.keys(plan.settings || {}).forEach(k => {
+      const v = String(plan.settings[k]), curV = String(E.settings(st.data)[k]);
+      out.push(curV === v ? { key: 'set_' + k, info: true, label: '가정값 ' + (PLAN_LABEL[k] || k), desc: '이미 ' + v } : { key: 'set_' + k, setting: k, value: v, label: '가정값 ' + (PLAN_LABEL[k] || k), desc: curV + ' → ' + v });
+    });
+    (plan.expenses || []).forEach((x, i) => {
+      const re = new RegExp(x.match);
+      const cur = (st.data.Expenses || []).find(r => E.isActive(r.active) && re.test(String(r.name)));
+      out.push(cur ? { key: 'exp' + i, info: true, label: '고정 지출 "' + cur.name + '"', desc: '이미 있음 (' + periodTxt(cur) + ' ' + fm(num(cur.amount, 0)) + ') — 그대로 둠' }
+        : { key: 'exp' + i, tab: 'Expenses', label: '고정 지출 추가 "' + x.row.name + '"', desc: periodTxt(x.row) + ' ' + fm(num(x.row.amount, 0)), row: Object.assign({ id: newId('exp'), active: 'Y' }, x.row) });
+    });
+    (plan.checks || []).forEach((c, i) => {
+      const have = (st.data.Assets || []).filter(r => E.isActive(r.active) && String(r.category) === c.cat).reduce((q, r) => q + num(r.value, 0), 0);
+      out.push({ key: 'chk' + i, info: true, warn: Math.abs(have - c.expect) > 0.5, label: '자산 점검: ' + c.label, desc: '시트 ' + fm(have) + ' / 예상 ' + fm(c.expect) + (Math.abs(have - c.expect) > 0.5 ? ' — 다릅니다. [관리 > 자산·현금]에서 확인하세요' : ' — 맞습니다') });
+    });
+    return out;
+  }
+  function planExtrasHtml() {
+    const ex = planExtras(), imp = st.evImp;
+    if (!ex.length) return '';
+    return '<h3 class="mt">함께 바뀌는 것</h3><ul class="costs">' + ex.map(x => '<li class="evx"><label>' + (x.info ? '<span class="evx-i">' + (x.warn ? '!' : '✓') + '</span>' : '<input type="checkbox" data-evx="' + x.key + '"' + (imp.xoff[x.key] ? '' : ' checked') + '>') + '<span><b' + (x.warn ? ' class="neg"' : '') + '>' + esc(x.label) + '</b> <span class="small muted">' + esc(x.desc) + '</span></span></label></li>').join('') + '</ul>';
   }
   async function evImportApply() {
     const imp = st.evImp, plan = evImportPlan();
     const offs = plan.old.filter(e => imp.off[e.id]);
-    if (!confirm('일정 ' + plan.rows.length + '건을 반영' + (offs.length ? '하고 기존 일정 ' + offs.length + '건을 제외로 바꿀' : '할') + '까요?')) return;
+    const extras = planExtras().filter(x => !x.info && !imp.xoff[x.key]);
+    if (!confirm((extras.length ? '대출·가정값 등 ' + extras.length + '건과 ' : '') + '일정 ' + plan.rows.length + '건을 반영' + (offs.length ? '하고 기존 일정 ' + offs.length + '건을 제외로 바꿀' : '할') + '까요?')) return;
     let n = 0;
     try {
       for (let i = 0; i < plan.rows.length; i++) {
@@ -1230,8 +1292,15 @@
         status('반영 중… ' + (++n) + '/' + (plan.rows.length + offs.length));
         e.active = 'N'; await api('save', { tab: 'Events', row: e });
       }
-      status('저장됨'); st.dirty = true; st.evImp = { open: false, txt: '', rows: null, off: {} };
-      toast('일정 ' + plan.rows.length + '건을 반영했습니다' + (offs.length ? ' (기존 ' + offs.length + '건 제외)' : '') + '. 현금 일정에서 확인하세요.');
+      for (const x of extras) {
+        status('반영 중… ' + (++n));
+        if (x.setting) { await saveSettingValue(x.setting, x.value); continue; }
+        await api('save', { tab: x.tab, row: x.row });
+        if (x.target) Object.assign(x.target, x.row); else (st.data[x.tab] = st.data[x.tab] || []).push(x.row);
+      }
+      try { sessionStorage.removeItem('am_plan'); } catch (e) { /* ignore */ }
+      status('저장됨'); st.dirty = true; st.evImp = { open: false, txt: '', rows: null, off: {}, xoff: {} };
+      toast('일정 ' + plan.rows.length + '건을 반영했습니다' + (offs.length ? ' (기존 ' + offs.length + '건 제외)' : '') + (extras.length ? ', 대출·가정값 등 ' + extras.length + '건 변경' : '') + '. 현금 일정에서 확인하세요.');
       render();
     } catch (err) { status('저장 실패'); toast('중간에 실패했습니다(' + n + '건 처리): ' + err.message + ' — [동기화] 후 확인하세요.', 'err'); }
   }
@@ -1289,6 +1358,7 @@
   main.addEventListener('change', e => {
     const t = e.target;
     if (t.id === 'lgMonth') { st.ledgerMonth = t.value; renderLedger(); return; }
+    if (t.dataset && t.dataset.evx != null) { st.evImp.xoff[t.dataset.evx] = !t.checked; return; }
     if (t.dataset && t.dataset.evoff != null) { st.evImp.off[t.dataset.evoff] = t.checked; render(); return; }
     if (t.dataset && t.dataset.pon != null) { st.paste[+t.dataset.pon].on = t.checked; renderLedger(); return; }
     if (t.dataset && t.dataset.pcat != null) { st.paste[+t.dataset.pcat].cat = t.value; return; }
@@ -1340,7 +1410,7 @@
       return;
     }
     if (t.closest('#evParse')) { const imp = st.evImp; imp.txt = $('#evTxt').value; imp.rows = parseEventText(imp.txt); imp.off = {}; imp.open = true; render(); if (!imp.rows.length) toast('읽을 수 있는 줄이 없습니다.', 'err'); return; }
-    if (t.closest('#evClear')) { st.evImp = { open: true, txt: '', rows: null, off: {} }; render(); return; }
+    if (t.closest('#evClear')) { try { sessionStorage.removeItem('am_plan'); } catch (err) { /* ignore */ } st.evImp = { open: true, txt: '', rows: null, off: {}, xoff: {} }; render(); return; }
     if (t.closest('#evApply')) { evImportApply(); return; }
     if (t.closest('#pasteClear')) { st.paste = null; renderLedger(); return; }
     if (t.closest('#pasteAdd')) { addPasted(); return; }
@@ -1422,7 +1492,8 @@
       history.replaceState(null, '', location.pathname + location.search);
     }
   } catch (e) { /* ignore */ }
-  window.__AM = { st, go, runRecurring, start: data => { st.local = true; st.data = data; st.dirty = true; $('#login').classList.add('hidden'); $('#app').classList.remove('hidden'); renderTabs(); render(); } };
+  try { takePlanFromHash(); } catch (e) { /* ignore */ }
+  window.__AM = { st, go, runRecurring, start: data => { st.local = true; st.data = data; st.dirty = true; openPendingPlan(); $('#login').classList.add('hidden'); $('#app').classList.remove('hidden'); renderTabs(); render(); } };
   if (window.__TEST_DATA) { window.__AM.start(window.__TEST_DATA); return; }
   if (getToken() && apiUrl()) loadAll().catch(() => showLogin(''));
   else showLogin('');
