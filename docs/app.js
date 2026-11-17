@@ -1229,7 +1229,7 @@
     if (imp.rows) {
       const plan = evImportPlan();
       const bad = imp.rows.filter(r => r.err);
-      body += '<h3 class="mt">새로 반영할 일정 ' + plan.rows.length + '건</h3><div class="tbl-wrap mini"><table><thead><tr><th>월</th><th>내용</th><th>종류</th><th class="r">금액</th><th></th></tr></thead><tbody>' +
+      if (imp.rows.length) body += '<h3 class="mt">새로 반영할 일정 ' + plan.rows.length + '건</h3><div class="tbl-wrap mini"><table><thead><tr><th>월</th><th>내용</th><th>종류</th><th class="r">금액</th><th></th></tr></thead><tbody>' +
         imp.rows.map((r, i) => r.err ? '<tr class="muted-row"><td colspan="5">읽지 못함(' + esc(r.err) + '): ' + esc(r.date + ' ' + r.name) + '</td></tr>' :
           '<tr><td>' + esc(r.date) + '</td><td>' + esc(r.name) + (r.certain === 'Y' ? '' : ' <span class="badge plain">추정</span>') + '</td><td>' + esc(optLabel('evCat', r.category)) + '</td><td class="r">' + signed(r.amount) + '</td><td class="small muted">' + (plan.upd[imp.rows.filter(x => !x.err).indexOf(r)] ? '같은 일정 덮어씀' : '새로 추가') + '</td></tr>').join('') + '</tbody></table></div>' +
         '<p class="small">합계 ' + signed(plan.rows.reduce((q, r) => q + r.amount, 0)) + (bad.length ? ' · <b class="neg">읽지 못한 줄 ' + bad.length + '개</b>' : '') + '</p>';
@@ -1237,7 +1237,7 @@
         '<div class="tbl-wrap mini"><table><thead><tr><th>제외</th><th>월</th><th>내용</th><th>종류</th><th class="r">금액</th></tr></thead><tbody>' +
         plan.old.map(e => '<tr><td><input type="checkbox" data-evoff="' + esc(e.id) + '"' + (imp.off[e.id] ? ' checked' : '') + ' aria-label="제외"></td><td>' + esc(e.date) + '</td><td>' + esc(e.name) + '</td><td>' + esc(optLabel('evCat', e.category)) + '</td><td class="r">' + signed(num(e.amount, 0)) + '</td></tr>').join('') + '</tbody></table></div>';
       body += planExtrasHtml();
-      if (plan.rows.length) body += '<div class="toolbar"><button class="primary" id="evApply">반영하기 (추가·덮어쓰기 ' + plan.rows.length + '건' + (plan.old.filter(e => imp.off[e.id]).length ? ', 제외 ' + plan.old.filter(e => imp.off[e.id]).length + '건' : '') + (imp.plan ? ', 대출·가정값 등 함께' : '') + ')</button></div>';
+      if (plan.rows.length || planExtras().some(x => !x.info)) body += '<div class="toolbar"><button class="primary" id="evApply">반영하기 (' + (plan.rows.length ? '일정 추가·덮어쓰기 ' + plan.rows.length + '건' : '일정 변경 없음') + (plan.old.filter(e => imp.off[e.id]).length ? ', 제외 ' + plan.old.filter(e => imp.off[e.id]).length + '건' : '') + (imp.plan ? ', 대출·가정값 등 함께' : '') + ')</button></div>';
     }
     return '<details class="card paste-card ev-import"' + (imp.open ? ' open' : '') + ' id="evImport"><summary><h2>여러 일정 한 번에 붙여넣기</h2><span class="small muted">새 계약 일정처럼 바뀐 숫자를 한꺼번에 반영</span></summary>' + (imp.plan ? '<div class="note info"><div class="hd"><span class="badge">적용 링크</span><span>' + esc(imp.plan.title || '받은 변경 묶음') + '</span></div><div class="body">아래 내용을 확인하고 맨 아래 [반영하기]를 누르면 시트에 저장됩니다. 체크를 풀면 그 항목은 건너뜁니다.</div></div>' : '') + body + '</details>';
   }
