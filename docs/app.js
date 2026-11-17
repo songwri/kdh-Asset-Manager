@@ -1154,7 +1154,7 @@
     }
     const [tab, title, desc] = MANAGE_INFO[s];
     main.innerHTML = pageHead('관리', '가진 돈, 수입, 정해진 지출, 대출, 큰 일정을 입력하는 곳입니다. 항목을 누르면 펼쳐서 고칠 수 있습니다.') + subnav('manage') +
-      (s === 'holdings' ? priceStatusHtml() : '') + (s === 'debts' ? checksHtml() : '') +
+      (s === 'holdings' ? priceStatusHtml() : '') + (s === 'debts' ? checksHtml() : '') + (s === 'events' ? evResultHtml() : '') +
       '<section class="card"><h2>' + title + '</h2><p class="small muted">' + desc + '</p>' + editList(tab, st.data[tab] || []) + '</section>' + (s === 'events' ? evImportHtml() : '');
     if (st.openId) { const d = main.querySelector('details[data-id="' + st.openId + '"] input'); if (d) d.focus(); st.openId = null; }
   }
@@ -1213,6 +1213,12 @@
     st.evImp = { open: true, txt: '', rows, off: {}, xoff: {}, plan };
     st.tab = 'manage'; st.subs.manage = 'events';
     return true;
+  }
+  function evResultHtml() {
+    const r = st.evResult;
+    if (!r) return '';
+    return '<section class="card"><div class="note ' + (r.ok ? 'ok' : 'risk') + '"><div class="hd"><span class="badge">' + (r.ok ? '반영 완료' : '실패') + '</span><span>' + (r.ok ? '시트에 저장했습니다' : '반영이 끝나지 않았습니다') + '</span></div><ul>' + r.lines.map(x => '<li>' + esc(x) + '</li>').join('') + '</ul>' +
+      '<div class="toolbar">' + (r.ok ? link('현금 일정에서 확인', 'flow') : '') + '<button class="ghost" id="evResultClose">닫기</button></div></div></section>';
   }
   function evImportHtml() {
     const imp = st.evImp = st.evImp || { open: false, txt: '', rows: null, off: {}, xoff: {} };
@@ -1276,33 +1282,44 @@
     const imp = st.evImp, plan = evImportPlan();
     const offs = plan.old.filter(e => imp.off[e.id]);
     const extras = planExtras().filter(x => !x.info && !imp.xoff[x.key]);
+    if (imp.busy) return;
     if (!confirm((extras.length ? '대출·가정값 등 ' + extras.length + '건과 ' : '') + '일정 ' + plan.rows.length + '건을 반영' + (offs.length ? '하고 기존 일정 ' + offs.length + '건을 제외로 바꿀' : '할') + '까요?')) return;
     let n = 0;
+    const total = plan.rows.length + offs.length + extras.length;
+    const prog = () => { status('반영 중… ' + n + '/' + total); const el = $('#evProg'); if (el) { el.textContent = '시트에 저장하는 중… ' + n + ' / ' + total + '건 (창을 닫지 마세요)'; } };
+    imp.busy = true;
+    const btn = $('#evApply'); if (btn) { btn.disabled = true; btn.insertAdjacentHTML('afterend', '<p class="small" id="evProg" role="status"></p>'); }
+    prog();
     try {
       for (let i = 0; i < plan.rows.length; i++) {
         const r = plan.rows[i], id = plan.upd[i];
         const row = { id: id || newId('eve'), date: r.date, name: r.name, amount: r.amount, category: r.category, certain: r.certain, note: r.note, active: 'Y' };
-        status('반영 중… ' + (++n) + '/' + (plan.rows.length + offs.length));
+        n++; prog();
         await api('save', { tab: 'Events', row });
         const list = st.data.Events = st.data.Events || [];
         const ex = list.find(e => String(e.id) === String(row.id));
         if (ex) Object.assign(ex, row); else list.push(row);
       }
       for (const e of offs) {
-        status('반영 중… ' + (++n) + '/' + (plan.rows.length + offs.length));
+        n++; prog();
         e.active = 'N'; await api('save', { tab: 'Events', row: e });
       }
       for (const x of extras) {
-        status('반영 중… ' + (++n));
+        n++; prog();
         if (x.setting) { await saveSettingValue(x.setting, x.value); continue; }
         await api('save', { tab: x.tab, row: x.row });
         if (x.target) Object.assign(x.target, x.row); else (st.data[x.tab] = st.data[x.tab] || []).push(x.row);
       }
       try { sessionStorage.removeItem('am_plan'); } catch (e) { /* ignore */ }
       status('저장됨'); st.dirty = true; st.evImp = { open: false, txt: '', rows: null, off: {}, xoff: {} };
+      st.evResult = { ok: true, lines: ['큰 일정 ' + plan.rows.length + '건 추가·덮어씀'].concat(offs.length ? ['예전 일정 ' + offs.length + '건 제외(기록만)로 바꿈: ' + offs.map(e => e.date + ' ' + e.name).join(', ')] : [], extras.map(x => x.label + ' — ' + x.desc)) };
       toast('일정 ' + plan.rows.length + '건을 반영했습니다' + (offs.length ? ' (기존 ' + offs.length + '건 제외)' : '') + (extras.length ? ', 대출·가정값 등 ' + extras.length + '건 변경' : '') + '. 현금 일정에서 확인하세요.');
+      render(); window.scrollTo(0, 0);
+    } catch (err) {
+      imp.busy = false;
+      st.evResult = { ok: false, lines: [n + '건까지 저장한 뒤 실패했습니다: ' + err.message, '[동기화]를 누른 뒤 같은 링크를 다시 열고 반영하기를 누르세요. 이미 들어간 일정은 덮어써서 중복되지 않습니다.'] };
       render();
-    } catch (err) { status('저장 실패'); toast('중간에 실패했습니다(' + n + '건 처리): ' + err.message + ' — [동기화] 후 확인하세요.', 'err'); }
+      status('저장 실패'); toast('중간에 실패했습니다(' + n + '건 처리): ' + err.message + ' — [동기화] 후 확인하세요.', 'err'); }
   }
 
   /* ---------- 라우팅 ---------- */
@@ -1411,6 +1428,7 @@
     }
     if (t.closest('#evParse')) { const imp = st.evImp; imp.txt = $('#evTxt').value; imp.rows = parseEventText(imp.txt); imp.off = {}; imp.open = true; render(); if (!imp.rows.length) toast('읽을 수 있는 줄이 없습니다.', 'err'); return; }
     if (t.closest('#evClear')) { try { sessionStorage.removeItem('am_plan'); } catch (err) { /* ignore */ } st.evImp = { open: true, txt: '', rows: null, off: {}, xoff: {} }; render(); return; }
+    if (t.closest('#evResultClose')) { st.evResult = null; render(); return; }
     if (t.closest('#evApply')) { evImportApply(); return; }
     if (t.closest('#pasteClear')) { st.paste = null; renderLedger(); return; }
     if (t.closest('#pasteAdd')) { addPasted(); return; }
